@@ -44,14 +44,4 @@ application/controller/static_pages.go
 sshwifty
 
 # Development artifacts
-BUILD_SUCCESS.md
-CHANGELOG_TELNET_REMOVAL.md
-INSTALLATION_GUIDE.md
-INTEGRATION_EXAMPLE.md
-QUICK_FIX.md
-README_SFTP_FEATURE.md
-SFTP_FEATURE_DESIGN.md
-SFTP_ISSUES_SUMMARY.md
-TELNET_REMOVAL_NOTES.md
-build-with-sftp.sh
-image/
+_dev_notes/
