@@ -92,7 +92,7 @@ func (s Server) normalize() Server {
 		serverMinValidSecond,
 	)
 	readTimeout := atLeast(
-		setZeroUintToDefault(s.ReadTimeout, 120*time.Second),
+		setZeroUintToDefault(s.ReadTimeout, 1800*time.Second),
 		serverMinValidSecond,
 	)
 	writeTimeout := atLeast(

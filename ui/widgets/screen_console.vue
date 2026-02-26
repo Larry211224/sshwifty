@@ -19,80 +19,201 @@
 
 <template>
   <div class="screen-console">
-    <div
-      class="console-console"
-      :style="'font-family: ' + typefaces + ', inherit'"
-    >
-      <h2 style="display: none">Console</h2>
+    <div class="console-main-area">
+      <a
+        v-if="hasSFTP && !filePanel"
+        class="sftp-pill"
+        href="javascript:;"
+        @click="toggleFilePanel"
+      >SFTP</a>
 
-      <div class="console-loading">
-        <div class="console-loading-frame">
-          <div class="console-loading-icon"></div>
-          <div class="console-loading-message">Initializing console ...</div>
+      <div v-if="filePanel" class="file-panel" :style="{ width: filePanelWidth + 'px', minWidth: filePanelWidth + 'px', maxWidth: filePanelWidth + 'px' }">
+        <div class="file-panel-topbar">
+          <div class="file-panel-breadcrumb">
+            <a
+              v-for="(seg, idx) in pathSegments"
+              :key="idx"
+              href="javascript:;"
+              class="breadcrumb-item"
+              :class="{ 'breadcrumb-root': idx === 0 }"
+              @click="navigateToSegment(idx)"
+            >{{ seg }}</a>
+          </div>
+          <div class="file-panel-actions">
+            <a class="fp-btn" href="javascript:;" @click="refreshFiles" title="Refresh">↻</a>
+            <a class="fp-btn" href="javascript:;" @click="triggerUpload" title="Upload">↑</a>
+            <a class="fp-btn" href="javascript:;" @click="createDirectory" title="New Folder">+</a>
+            <a class="fp-btn fp-btn-close" href="javascript:;" @click="toggleFilePanel" title="Close">✕</a>
+          </div>
+          <input
+            ref="fileUploadInput"
+            type="file"
+            multiple
+            style="display:none"
+            @change="handleFileSelect"
+          />
+        </div>
+
+        <div v-if="fileLoading" class="file-panel-loading">Loading...</div>
+        <div v-if="fileError" class="file-panel-error">{{ fileError }}</div>
+
+        <div class="file-list">
+          <div
+            v-if="currentPath !== '/'"
+            class="file-item file-item-dir"
+            @click="navigateUp"
+          >
+            <span class="file-icon file-icon-dir">&laquo;</span>
+            <span class="file-name">..</span>
+          </div>
+          <div
+            v-for="f in sortedFiles"
+            :key="f.name"
+            class="file-item"
+            :class="{'file-item-dir': f.isDir}"
+            @click="fileItemClick(f)"
+          >
+            <span class="file-icon" :class="f.isDir ? 'file-icon-dir' : 'file-icon-file'">{{ f.isDir ? '/' : ' ' }}</span>
+            <span class="file-name" :title="f.name">{{ f.name }}</span>
+            <span class="file-size">{{ f.isDir ? '' : formatSize(f.size) }}</span>
+            <a
+              v-if="!f.isDir"
+              class="file-action"
+              href="javascript:;"
+              @click.stop="downloadFile(f)"
+              title="Download"
+            >Save</a>
+            <a
+              class="file-action file-action-delete"
+              href="javascript:;"
+              @click.stop="deleteItem(f)"
+              title="Delete"
+            >Del</a>
+          </div>
+        </div>
+
+        <div v-if="transfers.length > 0" class="file-transfers">
+          <div class="transfer-title">Transfers ({{ transfers.length }})</div>
+          <div v-for="(t, idx) in transfers" :key="idx" class="transfer-item">
+            <div class="transfer-info">
+              <span class="transfer-name" :title="t.name">{{ t.name }}</span>
+              <span v-if="t.status === 'queued'" class="transfer-status transfer-queued">queued</span>
+              <span v-else-if="t.progress < 0" class="transfer-status transfer-failed">failed</span>
+              <span v-else class="transfer-status transfer-active">
+                {{ t.progress }}%
+                <span v-if="t.speed > 0" class="transfer-speed">{{ formatSpeed(t.speed) }}</span>
+              </span>
+            </div>
+            <div v-if="t.status !== 'queued' && t.progress >= 0" class="transfer-bar-bg">
+              <div class="transfer-bar-fill" :style="{ width: t.progress + '%' }"></div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!--
-      Tell you this: the background transparent below is probably the most
-      important transparent setting in the entire application. Make sure user
-      can see through it so they can operate the console while keep the toolbar
-      open.
-    -->
-    <div
-      v-if="toolbar"
-      class="console-toolbar"
-      :style="'background-color: ' + control.color() + 'ee'"
-    >
-      <h2 style="display: none">Tool bar</h2>
+      <div
+        class="file-panel-resize"
+        @mousedown="startResize"
+      ></div>
 
-      <div class="console-toolbar-group console-toolbar-group-left">
-        <div class="console-toolbar-item">
-          <h3 class="tb-title">Text size</h3>
-
-          <ul class="lst-nostyle">
-            <li>
-              <a class="tb-item" href="javascript:;" @click="fontSizeUp">
-                <span
-                  class="tb-key-icon tb-key-resize-icon icon icon-keyboardkey1 icon-iconed-bottom1"
-                >
-                  <i>+</i>
-                  Increase
-                </span>
-              </a>
-            </li>
-            <li>
-              <a class="tb-item" href="javascript:;" @click="fontSizeDown">
-                <span
-                  class="tb-key-icon tb-key-resize-icon icon icon-keyboardkey1 icon-iconed-bottom1"
-                >
-                  <i>-</i>
-                  Decrease
-                </span>
-              </a>
-            </li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="console-toolbar-group console-toolbar-group-main">
+      <div
+        class="console-console-wrapper"
+        @dragover.prevent="onDragOver"
+        @dragleave.prevent="onDragLeave"
+        @drop.prevent="onDrop"
+      >
         <div
-          v-for="(keyType, keyTypeIdx) in screenKeys"
-          :key="keyTypeIdx"
-          class="console-toolbar-item"
+          v-if="toolbar"
+          class="console-toolbar"
+          :style="'background-color: ' + control.color() + 'ee'"
         >
-          <h3 class="tb-title">{{ keyType.title }}</h3>
+          <h2 style="display: none">Tool bar</h2>
 
-          <ul class="hlst lst-nostyle">
-            <li v-for="(key, keyIdx) in keyType.keys" :key="keyIdx">
-              <a
-                class="tb-item"
-                href="javascript:;"
-                @click="sendSpecialKey(key[1])"
-                v-html="$options.filters.specialKeyHTML(key[0])"
-              ></a>
-            </li>
-          </ul>
+          <div class="console-toolbar-group console-toolbar-group-left">
+            <div class="console-toolbar-item">
+              <h3 class="tb-title">Text size</h3>
+
+              <ul class="lst-nostyle">
+                <li>
+                  <a class="tb-item" href="javascript:;" @click="fontSizeUp">
+                    <span
+                      class="tb-key-icon tb-key-resize-icon icon icon-keyboardkey1 icon-iconed-bottom1"
+                    >
+                      <i>+</i>
+                      Increase
+                    </span>
+                  </a>
+                </li>
+                <li>
+                  <a class="tb-item" href="javascript:;" @click="fontSizeDown">
+                    <span
+                      class="tb-key-icon tb-key-resize-icon icon icon-keyboardkey1 icon-iconed-bottom1"
+                    >
+                      <i>-</i>
+                      Decrease
+                    </span>
+                  </a>
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="hasSFTP" class="console-toolbar-item">
+              <h3 class="tb-title">Files</h3>
+              <ul class="lst-nostyle">
+                <li>
+                  <a class="tb-item" href="javascript:;" @click="toggleFilePanel">
+                    <span
+                      class="tb-key-icon tb-key-resize-icon icon icon-keyboardkey1 icon-iconed-bottom1"
+                    >
+                      {{ filePanel ? 'Hide' : 'Show' }}
+                    </span>
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="console-toolbar-group console-toolbar-group-main">
+            <div
+              v-for="(keyType, keyTypeIdx) in screenKeys"
+              :key="keyTypeIdx"
+              class="console-toolbar-item"
+            >
+              <h3 class="tb-title">{{ keyType.title }}</h3>
+
+              <ul class="hlst lst-nostyle">
+                <li v-for="(key, keyIdx) in keyType.keys" :key="keyIdx">
+                  <a
+                    class="tb-item"
+                    href="javascript:;"
+                    @click="sendSpecialKey(key[1])"
+                    v-html="$options.filters.specialKeyHTML(key[0])"
+                  ></a>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="dragOver"
+          class="drop-overlay"
+        >
+          <div class="drop-overlay-text">Drop files to upload</div>
+        </div>
+
+        <div
+          class="console-console"
+          :style="'font-family: ' + typefaces + ', inherit'"
+        >
+          <h2 style="display: none">Console</h2>
+
+          <div class="console-loading">
+            <div class="console-loading-frame">
+              <div class="console-loading-icon"></div>
+              <div class="console-loading-message">Initializing console ...</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -149,7 +270,7 @@ class Term {
 
     this.control = control;
     this.closed = false;
-    this.fontSize = termDefaultFontSize;
+    this.fontSize = this._loadFontSize();
     this.term = new Terminal({
       allowProposedApi: true,
       allowTransparency: false,
@@ -298,6 +419,7 @@ class Term {
     }
     this.fontSize += 2;
     this.term.options.fontSize = this.fontSize;
+    this._saveFontSize();
     this.refit();
   }
 
@@ -310,7 +432,27 @@ class Term {
     }
     this.fontSize -= 2;
     this.term.options.fontSize = this.fontSize;
+    this._saveFontSize();
     this.refit();
+  }
+
+  _saveFontSize() {
+    try {
+      localStorage.setItem("sshwifty_font_size", String(this.fontSize));
+    } catch (_e) { /* localStorage unavailable */ }
+  }
+
+  _loadFontSize() {
+    try {
+      const saved = localStorage.getItem("sshwifty_font_size");
+      if (saved) {
+        const size = parseInt(saved, 10);
+        if (size >= termMinFontSize && size <= termMaxFontSize) {
+          return size;
+        }
+      }
+    } catch (_e) { /* localStorage unavailable */ }
+    return termDefaultFontSize;
   }
 
   focus() {
@@ -409,10 +551,32 @@ export default {
         keydown: null,
         keyup: null,
       },
+      hasSFTP: false,
+      filePanel: false,
+      filePanelWidth: 260,
+      resizing: false,
+      currentPath: "/",
+      files: [],
+      fileLoading: false,
+      fileError: "",
+      dragOver: false,
+      transfers: [],
     };
   },
+  computed: {
+    pathSegments() {
+      if (this.currentPath === "/") return ["/"];
+      const parts = this.currentPath.split("/").filter((s) => s.length > 0);
+      return ["/"].concat(parts);
+    },
+    sortedFiles() {
+      const dirs = this.files.filter((f) => f.isDir).sort((a, b) => a.name.localeCompare(b.name));
+      const regular = this.files.filter((f) => !f.isDir).sort((a, b) => a.name.localeCompare(b.name));
+      return dirs.concat(regular);
+    },
+  },
   watch: {
-    active(newVal, oldVal) {
+    active(newVal) {
       this.triggerActive(newVal);
     },
     change: {
@@ -434,6 +598,10 @@ export default {
         this.fit();
       },
       deep: true,
+    },
+    filePanel() {
+      const self = this;
+      setTimeout(() => { self.fit(); }, 50);
     },
   },
   async mounted() {
@@ -463,7 +631,6 @@ export default {
           onSuccess(await self.loadRemoteFont(typefaces, timeout));
           return;
         } catch (e) {
-          // Wait and then retry
           await new Promise(res => {
             window.setTimeout(() => { res(); }, timeout);
           });
@@ -528,8 +695,30 @@ export default {
 
       self.triggerActive(this.active);
       self.runRunner();
+      self.initSFTPListener();
+    },
+    initSFTPListener() {
+      if (!this.control) return;
+      const self = this;
+      this.control.onToggleFiles(() => {
+        self.toggleFilePanel();
+      });
+
+      const waitForSession = () => {
+        if (self.term.destroyed()) return;
+        if (self.control && self.control.sessionID) {
+          self.hasSFTP = true;
+        } else {
+          setTimeout(waitForSession, 500);
+        }
+      };
+      waitForSession();
     },
     async deinit() {
+      if (this._resizeCleanup) {
+        this._resizeCleanup();
+        this._resizeCleanup = null;
+      }
       await this.closeRunner();
       await this.deactivate();
       this.term.destroy();
@@ -586,6 +775,217 @@ export default {
     },
     fontSizeDown() {
       this.term.fontSizeDown();
+    },
+    toggleFilePanel() {
+      this.filePanel = !this.filePanel;
+      if (this.filePanel && this.files.length === 0) {
+        this.refreshFiles();
+      }
+    },
+    startResize(e) {
+      e.preventDefault();
+      this.resizing = true;
+      const startX = e.clientX;
+      const startWidth = this.filePanelWidth;
+      const onMouseMove = (ev) => {
+        const delta = ev.clientX - startX;
+        const newWidth = Math.min(Math.max(startWidth + delta, 160), 500);
+        this.filePanelWidth = newWidth;
+      };
+      const onMouseUp = () => {
+        this.resizing = false;
+        this._resizeCleanup = null;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+      this._resizeCleanup = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    async refreshFiles() {
+      if (!this.control || !this.control.sessionID) return;
+      this.fileLoading = true;
+      this.fileError = "";
+      try {
+        const client = await this.control.getSFTPClient();
+        this.files = await client.list(this.currentPath);
+        this.fileLoading = false;
+      } catch (e) {
+        this.fileLoading = false;
+        this.fileError = e.message || "Request failed";
+      }
+    },
+    navigateToSegment(idx) {
+      if (idx === 0) {
+        this.currentPath = "/";
+      } else {
+        const parts = this.currentPath.split("/").filter((s) => s.length > 0);
+        this.currentPath = "/" + parts.slice(0, idx).join("/");
+      }
+      this.refreshFiles();
+    },
+    navigateUp() {
+      const parts = this.currentPath.split("/").filter((s) => s.length > 0);
+      parts.pop();
+      this.currentPath = parts.length > 0 ? "/" + parts.join("/") : "/";
+      this.refreshFiles();
+    },
+    fileItemClick(f) {
+      if (f.isDir) {
+        const newPath = this.currentPath === "/" ? "/" + f.name : this.currentPath + "/" + f.name;
+        this.currentPath = newPath;
+        this.refreshFiles();
+      }
+    },
+    async downloadFile(f) {
+      if (!this.control || !this.control.sessionID) return;
+      const filePath = this.currentPath === "/" ? "/" + f.name : this.currentPath + "/" + f.name;
+      try {
+        const client = await this.control.getSFTPClient();
+        const blob = await client.download(filePath);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = f.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        this.fileError = e.message || "Download failed";
+      }
+    },
+    async deleteItem(f) {
+      const msg = f.isDir
+        ? "Delete folder \"" + f.name + "\" and ALL its contents?"
+        : "Delete file \"" + f.name + "\"?";
+      if (!confirm(msg)) return;
+      const itemPath = this.currentPath === "/" ? "/" + f.name : this.currentPath + "/" + f.name;
+      this.fileLoading = true;
+      try {
+        const client = await this.control.getSFTPClient();
+        await client.delete(itemPath);
+        await this.refreshFiles();
+      } catch (e) {
+        this.fileLoading = false;
+        this.fileError = e.message || "Delete failed";
+      }
+    },
+    async createDirectory() {
+      const name = prompt("New directory name:");
+      if (!name) return;
+      const dirPath = this.currentPath === "/" ? "/" + name : this.currentPath + "/" + name;
+      this.fileLoading = true;
+      try {
+        const client = await this.control.getSFTPClient();
+        await client.mkdir(dirPath);
+        await this.refreshFiles();
+      } catch (e) {
+        this.fileLoading = false;
+        this.fileError = e.message || "Mkdir failed";
+      }
+    },
+    triggerUpload() {
+      this.$refs.fileUploadInput.click();
+    },
+    async handleFileSelect(e) {
+      const fileList = e.target.files;
+      if (!fileList || fileList.length === 0) return;
+      const files = Array.from(fileList);
+      e.target.value = "";
+      this.enqueueUploads(files);
+    },
+    enqueueUploads(files) {
+      if (!this.control || !this.control.sessionID) return;
+      const tasks = files.map((file) => ({
+        file,
+        transfer: {
+          name: file.name,
+          progress: 0,
+          status: "queued",
+          size: file.size,
+        },
+      }));
+      for (const t of tasks) {
+        this.transfers.push(t.transfer);
+      }
+      this.processUploadQueue(tasks);
+    },
+    async processUploadQueue(tasks) {
+      for (const task of tasks) {
+        await this.uploadSingleFile(task.file, task.transfer);
+      }
+    },
+    async uploadSingleFile(file, transfer) {
+      if (!this.control || !this.control.sessionID) return;
+      const filePath =
+        this.currentPath === "/"
+          ? "/" + file.name
+          : this.currentPath + "/" + file.name;
+
+      try {
+        const client = await this.control.getSFTPClient();
+        let started = false;
+        await client.upload(filePath, file, (pct, speed) => {
+          if (!started) {
+            started = true;
+            this.$set(transfer, "status", "uploading");
+          }
+          this.$set(transfer, "progress", pct);
+          if (speed > 0) {
+            this.$set(transfer, "speed", speed);
+          }
+        });
+
+        const idx = this.transfers.indexOf(transfer);
+        if (idx >= 0) this.transfers.splice(idx, 1);
+
+        await this.refreshFiles();
+      } catch (e) {
+        this.$set(transfer, "progress", -1);
+        this.$set(transfer, "status", "failed");
+        this.fileError = "Upload failed: " + (e.message || e);
+      }
+    },
+    formatSize(bytes) {
+      if (bytes < 1024) return bytes + " B";
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+      if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+      return (bytes / (1024 * 1024 * 1024)).toFixed(1) + " GB";
+    },
+    formatSpeed(bytesPerSec) {
+      if (bytesPerSec < 1024) return bytesPerSec.toFixed(0) + " B/s";
+      if (bytesPerSec < 1024 * 1024)
+        return (bytesPerSec / 1024).toFixed(1) + " KB/s";
+      if (bytesPerSec < 1024 * 1024 * 1024)
+        return (bytesPerSec / (1024 * 1024)).toFixed(1) + " MB/s";
+      return (bytesPerSec / (1024 * 1024 * 1024)).toFixed(1) + " GB/s";
+    },
+    onDragOver() {
+      if (this.hasSFTP) this.dragOver = true;
+    },
+    onDragLeave() {
+      this.dragOver = false;
+    },
+    onDrop(e) {
+      this.dragOver = false;
+      if (!this.hasSFTP) return;
+      const droppedFiles = e.dataTransfer.files;
+      if (!droppedFiles || droppedFiles.length === 0) return;
+      if (!this.filePanel) {
+        this.filePanel = true;
+        if (this.files.length === 0) this.refreshFiles();
+      }
+      this.enqueueUploads(Array.from(droppedFiles));
     },
   },
 };

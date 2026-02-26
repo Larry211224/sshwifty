@@ -243,6 +243,8 @@ export default {
 
         this.$emit("navigate-to", "");
       });
+    } else {
+      setTimeout(() => this.tryAutoReconnect(), 500);
     }
 
     window.addEventListener("beforeunload", this.onBrowserClose);
@@ -250,7 +252,7 @@ export default {
   beforeDestroy() {
     window.removeEventListener("beforeunload", this.onBrowserClose);
 
-    if (this.ticker === null) {
+    if (this.ticker !== null) {
       clearInterval(this.ticker);
       this.ticker = null;
     }
@@ -511,6 +513,79 @@ export default {
       this.addToTab(data);
 
       this.$emit("tab-opened", this.tab.tabs);
+
+      setTimeout(() => this.saveAutoReconnect(), 1000);
+    },
+    saveAutoReconnect() {
+      try {
+        const tabs = this.tab.tabs;
+        if (tabs.length === 0) return;
+        const lastTab = tabs[tabs.length - 1];
+        const control = lastTab.control;
+        if (!control || !control.reconnectToken) return;
+
+        const knowns = this.connector.historyRec.all();
+        if (knowns.length === 0) return;
+        const latest = knowns[knowns.length - 1];
+
+        sessionStorage.setItem(
+          "sshwifty_auto_reconnect",
+          JSON.stringify({
+            token: control.reconnectToken,
+            uid: latest.uid,
+            title: latest.title,
+            type: latest.type,
+            data: {
+              host: latest.data.host,
+              user: latest.data.user,
+              authentication: latest.data.authentication,
+              charset: latest.data.charset,
+              fingerprint: latest.data.fingerprint,
+              tabColor: latest.data.tabColor,
+            },
+            ts: Date.now(),
+          }),
+        );
+      } catch (_e) {
+        // sessionStorage may be unavailable
+      }
+    },
+    async tryAutoReconnect() {
+      try {
+        const raw = sessionStorage.getItem("sshwifty_auto_reconnect");
+        if (!raw) return;
+
+        const saved = JSON.parse(raw);
+        const elapsed = Date.now() - (saved.ts || 0);
+        const maxAge = 30 * 60 * 1000;
+        if (elapsed > maxAge) {
+          sessionStorage.removeItem("sshwifty_auto_reconnect");
+          return;
+        }
+
+        if (!saved.token) return;
+
+        const resp = await fetch(
+          "/sshwifty/reconnect?token=" + encodeURIComponent(saved.token),
+        );
+        if (!resp.ok) {
+          sessionStorage.removeItem("sshwifty_auto_reconnect");
+          return;
+        }
+        // Consume the response body to release the connection
+        await resp.json();
+
+        this.connectKnown({
+          uid: saved.uid,
+          title: saved.title,
+          type: saved.type,
+          data: saved.data,
+          session: { credential: "_reconnect:" + saved.token },
+          keptSessions: ["credential"],
+        });
+      } catch (_e) {
+        sessionStorage.removeItem("sshwifty_auto_reconnect");
+      }
     },
     async addToTab(data) {
       await this.switchTab(
@@ -539,7 +614,9 @@ export default {
       this.tab.current = isLast ? this.tab.tabs.length - 1 : index;
     },
     async switchTab(to) {
-      if (this.tab.current >= 0) {
+      if (to < 0 || to >= this.tab.tabs.length) return;
+
+      if (this.tab.current >= 0 && this.tab.current < this.tab.tabs.length) {
         await this.tab.tabs[this.tab.current].control.disabled();
       }
 
@@ -554,6 +631,7 @@ export default {
       await this.tab.tabs[tab].control.retap(this.tab.tabs[tab].toolbar);
     },
     async closeTab(index) {
+      if (index < 0 || index >= this.tab.tabs.length) return;
       if (this.tab.tabs[index].status.closing) {
         return;
       }
@@ -575,6 +653,7 @@ export default {
       this.$emit("tab-closed", this.tab.tabs);
     },
     tabStopped(index, reason) {
+      if (index < 0 || index >= this.tab.tabs.length) return;
       if (reason !== null) {
         this.tab.tabs[index].indicator.message = "" + reason;
         this.tab.tabs[index].indicator.level = "error";

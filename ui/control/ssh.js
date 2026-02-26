@@ -20,6 +20,7 @@ import * as color from "../commands/color.js";
 import * as common from "../commands/common.js";
 import * as reader from "../stream/reader.js";
 import * as subscribe from "../stream/subscribe.js";
+import { SFTPClient } from "../sftp/client.js";
 
 class Control {
   constructor(data, color) {
@@ -33,11 +34,16 @@ class Control {
       return iconv.encode(dStr, this.charset);
     };
 
+    this.closed = false;
     this.enable = false;
     this.sender = data.send;
     this.closer = data.close;
     this.resizer = data.resize;
     this.subs = new subscribe.Subscribe();
+    this._toggleFilesHandler = null;
+    this.sftpClient = null;
+    this.sessionID = null;
+    this.reconnectToken = null;
 
     let self = this;
 
@@ -57,10 +63,27 @@ class Control {
       }
     });
 
+    data.events.place("session_id", async (rd) => {
+      try {
+        const raw = await reader.readCompletely(rd);
+        const text = new TextDecoder().decode(raw);
+        const parts = text.split("\n");
+        self.sessionID = parts[0];
+        if (parts.length > 1) {
+          self.reconnectToken = parts[1];
+        }
+      } catch (e) {
+        // Do nothing
+      }
+    });
+
     data.events.place("completed", () => {
       self.closed = true;
       self.background.forget();
-
+      if (self.sftpClient) {
+        self.sftpClient.close();
+        self.sftpClient = null;
+      }
       self.subs.reject("Remote connection has been terminated");
     });
   }
@@ -111,7 +134,38 @@ class Control {
     return this.background.hex();
   }
 
+  hasSFTP() {
+    return this.sessionID !== null;
+  }
+
+  async getSFTPClient() {
+    if (this.sftpClient && this.sftpClient.isConnected()) {
+      return this.sftpClient;
+    }
+    if (!this.sessionID) {
+      throw new Error("No session ID available");
+    }
+    this.sftpClient = new SFTPClient();
+    await this.sftpClient.connect(this.sessionID);
+    return this.sftpClient;
+  }
+
+  onToggleFiles(handler) {
+    this._toggleFilesHandler = handler;
+  }
+
+  toggleFiles() {
+    if (this._toggleFilesHandler) {
+      this._toggleFilesHandler();
+    }
+  }
+
   close() {
+    if (this.sftpClient) {
+      this.sftpClient.close();
+      this.sftpClient = null;
+    }
+
     if (this.closer === null) {
       return;
     }

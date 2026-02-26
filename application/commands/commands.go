@@ -21,8 +21,7 @@ import "github.com/nirui/sshwifty/application/command"
 
 // New creates a new commands group
 func New() command.Commands {
-	return command.Commands{
-		command.Register("Telnet", newTelnet, parseTelnetConfig),
-		command.Register("SSH", newSSH, parseSSHConfig),
-	}
+	var cmds command.Commands
+	cmds.Register(0, "SSH", newSSH, parseSSHConfig)
+	return cmds
 }

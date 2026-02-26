@@ -23,10 +23,8 @@ import { Commands } from "./commands/commands.js";
 import { Controls } from "./commands/controls.js";
 import { Presets } from "./commands/presets.js";
 import * as ssh from "./commands/ssh.js";
-import * as telnet from "./commands/telnet.js";
 import "./common.css";
 import * as sshctl from "./control/ssh.js";
-import * as telnetctl from "./control/telnet.js";
 import * as cipher from "./crypto.js";
 import Home from "./home.vue";
 import "./landing.css";
@@ -119,11 +117,8 @@ function startApp(rootEl) {
         authErr: "",
         loadErr: "",
         socket: null,
-        controls: new Controls([
-          new telnetctl.Telnet(uiControlColors),
-          new sshctl.SSH(uiControlColors),
-        ]),
-        commands: new Commands([new telnet.Command(), new ssh.Command()]),
+        controls: new Controls([new sshctl.SSH(uiControlColors)]),
+        commands: new Commands([new ssh.Command()]),
         tabUpdateIndicator: null,
         viewPort: {
           dim: {

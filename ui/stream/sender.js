@@ -100,7 +100,7 @@ export class Sender {
     const buffer = this.buffer.slice(0, this.bufferUsed);
 
     this.bufferUsed = 0;
-    this.bufferedRequests = 0;
+    this.bufferReq = 0;
 
     return buffer;
   }
@@ -163,9 +163,8 @@ export class Sender {
       this.sendDelay = null;
     }
 
-    this.buffered = null;
     this.bufferUsed = 0;
-    this.bufferedRequests = 0;
+    this.bufferReq = 0;
 
     this.subscribe.reject(new Exception("Sender has been cleared", false));
     this.subscribe.disable();
@@ -185,12 +184,11 @@ export class Sender {
    *
    */
   send(data) {
-    let delayCleared = false;
+    const hadPendingDelay = this.sendDelay !== null;
 
-    if (this.sendDelay !== null) {
+    if (hadPendingDelay) {
       clearTimeout(this.sendDelay);
       this.sendDelay = null;
-      delayCleared = true;
     }
 
     const self = this;
@@ -202,21 +200,22 @@ export class Sender {
         reject: reject,
       });
 
-      if (self.bufferedRequests >= self.maxBufferedRequests) {
-        self.bufferedRequests = 0;
-
+      if (!hadPendingDelay) {
         self.subscribe.resolve(true);
-
         return;
       }
 
-      if (delayCleared) {
-        self.bufferedRequests++;
+      self.bufferReq++;
+
+      if (self.bufferReq >= self.maxBufferedRequests) {
+        self.bufferReq = 0;
+        self.subscribe.resolve(true);
+        return;
       }
 
       self.sendDelay = setTimeout(() => {
         self.sendDelay = null;
-        self.bufferedRequests = 0;
+        self.bufferReq = 0;
 
         self.subscribe.resolve(true);
       }, self.bufferFlushDelay);

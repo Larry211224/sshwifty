@@ -22,6 +22,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,12 @@ const (
 	SSHClientResize             = 0x01
 	SSHClientRespondFingerprint = 0x02
 	SSHClientRespondCredential  = 0x03
+	SSHClientSFTPRequest        = 0x04
+)
+
+// Server -> client markers
+const (
+	SSHServerSessionID = 0x07
 )
 
 const (
@@ -140,9 +147,10 @@ func (s *sshRemoteConnWrapper) Write(b []byte) (int, error) {
 }
 
 type sshRemoteConn struct {
-	writer  io.Writer
-	closer  func() error
-	session *ssh.Session
+	writer    io.Writer
+	closer    func() error
+	session   *ssh.Session
+	sshClient *ssh.Client
 }
 
 func (s sshRemoteConn) isValid() bool {
@@ -169,6 +177,10 @@ type sshClient struct {
 	fingerprintVerifyResultReceiveClosed bool
 	remoteConnReceive                    chan sshRemoteConn
 	remoteConn                           sshRemoteConn
+	sessionID          string
+	resolvedAuth       []ssh.AuthMethod
+	rawCredential      string
+	rawAuthMethodType  byte
 }
 
 func newSSH(
@@ -298,7 +310,17 @@ func (d *sshClient) buildAuthMethod(
 						return "", ErrSSHAuthCancelled
 					}
 
-					return string(passphraseBytes), nil
+					passphrase := string(passphraseBytes)
+					if strings.HasPrefix(passphrase, "_reconnect:") {
+						token := passphrase[len("_reconnect:"):]
+						if ri, ok := GlobalReconnectTokens.Get(token); ok {
+							passphrase = ri.Credential
+						}
+					}
+					d.resolvedAuth = []ssh.AuthMethod{ssh.Password(passphrase)}
+					d.rawCredential = passphrase
+					d.rawAuthMethodType = SSHAuthMethodPassphrase
+					return passphrase, nil
 				}),
 			}
 		}, nil
@@ -323,11 +345,22 @@ func (d *sshClient) buildAuthMethod(
 						return nil, ErrSSHAuthCancelled
 					}
 
+					keyStr := string(privateKeyBytes)
+					if strings.HasPrefix(keyStr, "_reconnect:") {
+						token := keyStr[len("_reconnect:"):]
+						if ri, ok := GlobalReconnectTokens.Get(token); ok {
+							privateKeyBytes = []byte(ri.Credential)
+						}
+					}
+
 					signer, signerErr := ssh.ParsePrivateKey(privateKeyBytes)
 					if signerErr != nil {
 						return nil, signerErr
 					}
 
+					d.resolvedAuth = []ssh.AuthMethod{ssh.PublicKeys(signer)}
+					d.rawCredential = string(privateKeyBytes)
+					d.rawAuthMethodType = SSHAuthMethodPrivateKey
 					return []ssh.Signer{signer}, signerErr
 				}),
 			}
@@ -492,6 +525,22 @@ func (d *sshClient) remote(
 	}
 	defer conn.Close()
 
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-d.baseCtx.Done():
+				return
+			case <-ticker.C:
+				_, _, err := conn.SendRequest("keepalive@openssh.com", true, nil)
+				if err != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	session, err := conn.NewSession()
 	if err != nil {
 		errLen := copy((*u)[d.w.HeaderSize():], err.Error()) + d.w.HeaderSize()
@@ -557,7 +606,8 @@ func (d *sshClient) remote(
 
 			return conn.Close()
 		},
-		session: session,
+		session:   session,
+		sshClient: conn,
 	}
 
 	wErr := d.w.SendManual(
@@ -566,9 +616,46 @@ func (d *sshClient) remote(
 		return
 	}
 
-	d.l.Debug("Serving")
+	d.sessionID = GenerateSessionID()
+	GlobalSessions.Register(d.sessionID, &SessionInfo{
+		Client:     conn,
+		Address:    address,
+		User:       user,
+		AuthMethod: d.resolvedAuth,
+		HostKey:    ssh.InsecureIgnoreHostKey(),
+	})
+	defer GlobalSessions.Unregister(d.sessionID)
 
-	errOutWg.Go(func() {
+	authMethodStr := "none"
+	switch d.rawAuthMethodType {
+	case SSHAuthMethodPassphrase:
+		authMethodStr = "Password"
+	case SSHAuthMethodPrivateKey:
+		authMethodStr = "Private Key"
+	}
+
+	reconnectToken := GenerateReconnectToken()
+	GlobalReconnectTokens.Register(reconnectToken, &ReconnectInfo{
+		Address:    address,
+		User:       user,
+		Credential: d.rawCredential,
+		AuthMethod: authMethodStr,
+		ExpiresAt:  time.Now().Add(30 * time.Minute),
+	})
+
+	combined := d.sessionID + "\n" + reconnectToken
+	combinedBytes := []byte(combined)
+	combinedLen := copy((*u)[d.w.HeaderSize():], combinedBytes) + d.w.HeaderSize()
+	wErr = d.w.SendManual(SSHServerSessionID, (*u)[:combinedLen])
+	if wErr != nil {
+		return
+	}
+
+	d.l.Debug("Serving (session %s)", d.sessionID)
+
+	errOutWg.Add(1)
+	go func() {
+		defer errOutWg.Done()
 		u := d.bufferPool.Get()
 		defer d.bufferPool.Put(u)
 
@@ -584,7 +671,7 @@ func (d *sshClient) remote(
 				return
 			}
 		}
-	})
+	}()
 
 	for {
 		rLen, rErr := out.Read((*u)[d.w.HeaderSize():])

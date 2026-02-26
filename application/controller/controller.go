@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/nirui/sshwifty/application/command"
+	"github.com/nirui/sshwifty/application/commands"
 	"github.com/nirui/sshwifty/application/configuration"
 	"github.com/nirui/sshwifty/application/log"
 	"github.com/nirui/sshwifty/application/server"
@@ -47,6 +48,8 @@ type handler struct {
 	homeCtl         home
 	socketCtl       socket
 	socketVerifyCtl socketVerification
+	sftpSocketCtl   sftpSocket
+	reconnectCtl    reconnectController
 }
 
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +105,10 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err = serveController(h.socketCtl, &ctlResponder, r, clientLogger)
 	case "/sshwifty/socket/verify":
 		err = serveController(h.socketVerifyCtl, &ctlResponder, r, clientLogger)
+	case "/sshwifty/sftp":
+		err = serveController(h.sftpSocketCtl, &ctlResponder, r, clientLogger)
+	case "/sshwifty/reconnect":
+		err = serveController(h.reconnectCtl, &ctlResponder, r, clientLogger)
 	case "/robots.txt":
 		err = serveStaticCacheData(
 			"robots.txt",
@@ -152,6 +159,7 @@ const (
 // Builder returns a http controller builder
 func Builder(cmds command.Commands) server.HandlerBuilder {
 	socketBuffers := command.NewBufferPool(socketBufferSize)
+	commands.GlobalReconnectTokens.StartCleanupLoop()
 	return func(
 		commonCfg configuration.Common,
 		cfg configuration.Server,
@@ -166,6 +174,8 @@ func Builder(cmds command.Commands) server.HandlerBuilder {
 			homeCtl:         home{},
 			socketCtl:       socketCtl,
 			socketVerifyCtl: newSocketVerification(socketCtl, cfg, commonCfg),
+			sftpSocketCtl:   newSFTPSocketCtl(cfg),
+			reconnectCtl:    reconnectController{},
 		}
 	}
 }

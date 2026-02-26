@@ -25,36 +25,38 @@
     @display="$emit('display', $event)"
   >
     <div id="connect-frame">
-      <h1 class="window-title">Establish connection with</h1>
-
       <slot v-if="inputting"></slot>
 
-      <connect-switch
-        v-if="!inputting"
-        :knowns-length="knowns.length"
-        :tab="tab"
-        @switch="switchTab"
-      ></connect-switch>
+      <template v-if="!inputting">
+        <h1 class="window-title">SSH Connection</h1>
 
-      <connect-new
-        v-if="tab === 'new' && !inputting"
-        :connectors="connectors"
-        @select="selectConnector"
-      ></connect-new>
+        <div v-if="singleConnector" id="connect-new-btn-wrap">
+          <a
+            id="connect-new-btn"
+            href="javascript:;"
+            @click="autoSelectSingle"
+          >+ New SSH Connection</a>
+        </div>
 
-      <connect-known
-        v-if="tab === 'known' && !inputting"
-        :presets="presets"
-        :restricted-to-presets="restrictedToPresets"
-        :knowns="knowns"
-        :launcher-builder="knownsLauncherBuilder"
-        :knowns-export="knownsExport"
-        :knowns-import="knownsImport"
-        @select="selectKnown"
-        @select-preset="selectPreset"
-        @remove="removeKnown"
-        @clear-session="clearSessionKnown"
-      ></connect-known>
+        <connect-new
+          v-if="!singleConnector"
+          :connectors="connectors"
+          @select="selectConnector"
+        ></connect-new>
+
+        <connect-known
+          :presets="presets"
+          :restricted-to-presets="restrictedToPresets"
+          :knowns="knowns"
+          :launcher-builder="knownsLauncherBuilder"
+          :knowns-export="knownsExport"
+          :knowns-import="knownsImport"
+          @select="selectKnown"
+          @select-preset="selectPreset"
+          @remove="removeKnown"
+          @clear-session="clearSessionKnown"
+        ></connect-known>
+      </template>
 
       <div id="connect-warning">
         <span id="connect-warning-icon" class="icon icon-warning1"></span>
@@ -83,14 +85,12 @@
 import "./connect.css";
 
 import Window from "./window.vue";
-import ConnectSwitch from "./connect_switch.vue";
 import ConnectKnown from "./connect_known.vue";
 import ConnectNew from "./connect_new.vue";
 
 export default {
   components: {
     window: Window,
-    "connect-switch": ConnectSwitch,
     "connect-known": ConnectKnown,
     "connect-new": ConnectNew,
   },
@@ -136,19 +136,28 @@ export default {
       default: false,
     },
   },
-  data() {
-    return {
-      tab: !this.restrictedToPresets ? "new" : "known",
-      canSelect: true,
-    };
+  computed: {
+    singleConnector() {
+      return this.connectors.length === 1;
+    },
+  },
+  watch: {
+    display(visible) {
+      if (
+        visible &&
+        !this.inputting &&
+        this.singleConnector &&
+        this.knowns.length === 0
+      ) {
+        this.$nextTick(() => {
+          this.autoSelectSingle();
+        });
+      }
+    },
   },
   methods: {
-    switchTab(to) {
-      if (this.inputting) {
-        return;
-      }
-
-      this.tab = to;
+    autoSelectSingle() {
+      this.selectConnector(this.connectors[0]);
     },
     selectConnector(connector) {
       if (this.inputting) {

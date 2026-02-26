@@ -27,12 +27,13 @@ import Exception from "./exception.js";
 import * as history from "./history.js";
 import * as presets from "./presets.js";
 import * as strings from "./string.js";
+import { credentials } from "./credentials.js";
 
 const AUTHMETHOD_NONE = 0x00;
 const AUTHMETHOD_PASSPHRASE = 0x01;
 const AUTHMETHOD_PRIVATE_KEY = 0x02;
 
-const COMMAND_ID = 0x01;
+const COMMAND_ID = 0x00;
 
 const MAX_USERNAME_LEN = 127;
 const MAX_PASSWORD_LEN = 4096;
@@ -50,6 +51,8 @@ const CLIENT_DATA_STDIN = 0x00;
 const CLIENT_DATA_RESIZE = 0x01;
 const CLIENT_CONNECT_RESPOND_FINGERPRINT = 0x02;
 const CLIENT_CONNECT_RESPOND_CREDENTIAL = 0x03;
+
+const SERVER_SESSION_ID = 0x07;
 
 const SERVER_REQUEST_ERROR_BAD_USERNAME = 0x01;
 const SERVER_REQUEST_ERROR_BAD_ADDRESS = 0x02;
@@ -87,6 +90,7 @@ class SSH {
         "@stderr",
         "close",
         "@completed",
+        "@session_id",
       ],
       callbacks,
     );
@@ -189,6 +193,12 @@ class SSH {
       case SERVER_REMOTE_STDOUT:
         if (this.connected) {
           return this.events.fire("stdout", rd);
+        }
+        break;
+
+      case SERVER_SESSION_ID:
+        if (this.connected) {
+          return this.events.fire("session_id", rd);
         }
         break;
     }
@@ -348,7 +358,8 @@ const initialFieldDef = {
   },
   Password: {
     name: "Password",
-    description: "",
+    description:
+      "Check 'Remember Password' below to save for quick reconnection",
     type: "password",
     value: "",
     example: "----------",
@@ -459,6 +470,20 @@ const initialFieldDef = {
         default:
           throw new Error("Authentication method must be specified");
       }
+    },
+  },
+  "Remember Password": {
+    name: "Remember Password",
+    description: "Save password in browser for quick reconnection",
+    type: "checkbox",
+    value: "",
+    example: "",
+    readonly: false,
+    suggestions() {
+      return [];
+    },
+    verify() {
+      return "";
     },
   },
   Fingerprint: {
@@ -741,6 +766,7 @@ class Wizard {
       },
       "@stdout"(rd) {},
       "@stderr"(rd) {},
+      "@session_id"(rd) {},
       close() {},
       "@completed"() {
         self.step.resolve(
@@ -900,7 +926,7 @@ class Wizard {
 
     switch (config.auth) {
       case AUTHMETHOD_PASSPHRASE:
-        fields = [{ name: "Password" }];
+        fields = [{ name: "Password" }, { name: "Remember Password" }];
         break;
 
       case AUTHMETHOD_PRIVATE_KEY:
@@ -927,17 +953,40 @@ class Wizard {
       },
     );
 
+    const userStr = new TextDecoder().decode(config.user);
+    const hostStr = config.host.address + ":" + config.host.port;
+
+    if (config.auth === AUTHMETHOD_PASSPHRASE) {
+      const saved = credentials.get("SSH", userStr, hostStr);
+
+      if (saved && saved.password) {
+        for (let i = 0; i < inputFields.length; i++) {
+          if (inputFields[i].name === "Password") {
+            inputFields[i].value = saved.password;
+          }
+          if (inputFields[i].name === "Remember Password") {
+            inputFields[i].value = "on";
+          }
+        }
+      }
+    }
+
     return command.prompt(
       "Provide credential",
       "Please input your credential",
       "Login",
       (r) => {
         let vv = r[fields[0].name.toLowerCase()];
+        let rememberPassword = r["remember password"];
 
         sd.send(
           CLIENT_CONNECT_RESPOND_CREDENTIAL,
           new TextEncoder().encode(vv),
         );
+
+        if (config.auth === AUTHMETHOD_PASSPHRASE) {
+          credentials.save("SSH", userStr, hostStr, vv, !!rememberPassword);
+        }
 
         newCredential(vv, presetCredentialUsed);
 

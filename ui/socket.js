@@ -23,8 +23,8 @@ import * as xhr from "./xhr.js";
 
 export const ECHO_FAILED = streams.ECHO_FAILED;
 
-const maxSenderDelay = 200;
-const minSenderDelay = 30;
+const maxSenderDelay = 30;
+const minSenderDelay = 5;
 
 class Dial {
   /**
@@ -204,7 +204,7 @@ class Dial {
             }
           },
           4096 - 64, // Server has a 4096 bytes receive buffer, can be no greater,
-          minSenderDelay, // 30ms input delay
+          minSenderDelay,
           10, // max 10 buffered requests
         );
 
