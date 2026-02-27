@@ -976,8 +976,8 @@ class Wizard {
       "Please input your credential",
       "Login",
       (r) => {
-        let vv = r[fields[0].name.toLowerCase()];
-        let rememberPassword = r["remember password"];
+        let vv = r[fields[0].name] || r[fields[0].name.toLowerCase()];
+        let rememberPassword = r["Remember Password"];
 
         sd.send(
           CLIENT_CONNECT_RESPOND_CREDENTIAL,
