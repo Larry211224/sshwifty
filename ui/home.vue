@@ -288,6 +288,7 @@ export default {
   },
   methods: {
     onBrowserClose(e) {
+      this.saveAutoReconnect();
       if (this.tab.current < 0) {
         return undefined;
       }
@@ -543,25 +544,41 @@ export default {
 
       this.$emit("tab-opened", this.tab.tabs);
 
-      setTimeout(() => this.saveAutoReconnect(), 1000);
+      this.scheduleAutoReconnectSave();
+    },
+    scheduleAutoReconnectSave() {
+      let attempts = 0;
+      const trySave = () => {
+        attempts++;
+        const tabs = this.tab.tabs;
+        const allHaveTokens = tabs.length > 0 && tabs.every(
+          (t) => t.control && t.control.reconnectToken,
+        );
+        if (allHaveTokens || attempts >= 10) {
+          this.saveAutoReconnect();
+        } else {
+          setTimeout(trySave, 500);
+        }
+      };
+      setTimeout(trySave, 500);
     },
     saveAutoReconnect() {
       try {
         const tabs = this.tab.tabs;
         if (tabs.length === 0) {
-          sessionStorage.removeItem("sshwifty_auto_reconnect_tabs");
+          // Don't clear sessionStorage during an active reconnect attempt
+          if (!this.reconnecting) {
+            sessionStorage.removeItem("sshwifty_auto_reconnect_tabs");
+          }
           return;
         }
 
-        // Load existing saved tabs to preserve real user data
-        let existingMap = {};
+        // Load existing saved tabs to preserve data across rapid refreshes
+        let existingEntries = [];
         try {
           const raw = sessionStorage.getItem("sshwifty_auto_reconnect_tabs");
           if (raw) {
-            const arr = JSON.parse(raw);
-            for (const entry of arr) {
-              if (entry.token) existingMap[entry.token] = entry;
-            }
+            existingEntries = JSON.parse(raw) || [];
           }
         } catch (_e) {
           void _e;
@@ -572,45 +589,70 @@ export default {
 
         for (let i = 0; i < tabs.length; i++) {
           const control = tabs[i].control;
-          if (!control || !control.reconnectToken) continue;
+          const token = control ? control.reconnectToken : null;
 
-          const token = control.reconnectToken;
-          let userData = null;
+          if (token) {
+            let userData = null;
 
-          // Find matching known entry for this tab
-          const tabName = tabs[i].name || "";
-          for (let k = knowns.length - 1; k >= 0; k--) {
-            const kn = knowns[k];
-            if (!kn.data || !kn.data.user) continue;
-            if (kn.data.user.startsWith("_reattach:")) continue;
-            const knTitle = kn.data.user + "@" + kn.data.host;
-            if (tabName.indexOf(kn.data.host) >= 0 || k === knowns.length - 1) {
-              userData = {
-                host: kn.data.host,
-                user: kn.data.user,
-                authentication: kn.data.authentication,
-                charset: kn.data.charset,
-                fingerprint: kn.data.fingerprint,
-                tabColor: kn.data.tabColor,
-              };
-              break;
+            // Parse user@host from tab name for precise matching
+            const tabName = tabs[i].name || "";
+            const atIdx = tabName.indexOf("@");
+            let tabUser = "";
+            let tabHost = tabName;
+            if (atIdx > 0) {
+              tabUser = tabName.slice(0, atIdx);
+              tabHost = tabName.slice(atIdx + 1);
             }
+
+            // Try to find matching known entry for auth/charset info
+            for (let k = knowns.length - 1; k >= 0; k--) {
+              const kn = knowns[k];
+              if (!kn.data || !kn.data.user) continue;
+              if (kn.data.user.startsWith("_reattach:")) continue;
+              if (kn.data.host === tabHost && kn.data.user === tabUser) {
+                userData = {
+                  host: kn.data.host,
+                  user: kn.data.user,
+                  authentication: kn.data.authentication,
+                  charset: kn.data.charset,
+                  fingerprint: kn.data.fingerprint,
+                  tabColor: kn.data.tabColor,
+                };
+                break;
+              }
+            }
+
+            // Fallback: construct userData from tab name
+            if (!userData && tabUser && tabHost) {
+              userData = {
+                host: tabHost,
+                user: tabUser,
+                authentication: "Passphrase",
+                charset: "utf-8",
+                fingerprint: "",
+                tabColor: "",
+              };
+            }
+
+            // Fall back to existing saved data by token
+            if (!userData) {
+              const existing = existingEntries.find((e) => e.token === token);
+              if (existing) userData = existing.data;
+            }
+
+            if (userData) {
+              entries.push({
+                token: token,
+                title: tabs[i].name || "",
+                type: "SSH",
+                data: userData,
+                ts: Date.now(),
+              });
+            }
+          } else if (i < existingEntries.length && existingEntries[i].token) {
+            // Tab hasn't received its token yet — keep the previous entry
+            entries.push(existingEntries[i]);
           }
-
-          // Fall back to existing saved data
-          if (!userData && existingMap[token]) {
-            userData = existingMap[token].data;
-          }
-
-          if (!userData) continue;
-
-          entries.push({
-            token: token,
-            title: tabs[i].name || "",
-            type: "SSH",
-            data: userData,
-            ts: Date.now(),
-          });
         }
 
         if (entries.length > 0) {
@@ -672,6 +714,9 @@ export default {
           return;
         }
 
+        // Pre-warm the WebSocket connection while checking reattach API
+        this.connection.get(this.socket).catch(() => {});
+
         let anySuccess = false;
         for (const saved of validEntries) {
           const ok = await this.tryReattachOrReconnect(saved);
@@ -692,7 +737,21 @@ export default {
         sessionStorage.removeItem("sshwifty_auto_reconnect_tabs");
       }
     },
+    waitForConnectorFree() {
+      return new Promise((resolve) => {
+        const check = () => {
+          if (!this.connector.acquired) {
+            resolve();
+          } else {
+            setTimeout(check, 50);
+          }
+        };
+        check();
+      });
+    },
     async tryReattachOrReconnect(saved) {
+      await this.waitForConnectorFree();
+
       // Try reattach first (preserves SSH session + terminal history)
       try {
         const reattachResp = await fetch(
@@ -708,6 +767,7 @@ export default {
             data: {
               host: saved.data.host,
               user: "_reattach:" + saved.token,
+              displayUser: saved.data.user,
               authentication: "None",
               charset: saved.data.charset,
               fingerprint: saved.data.fingerprint,
@@ -716,6 +776,7 @@ export default {
             session: { credential: "" },
             keptSessions: [],
           });
+          await this.waitForConnectorFree();
           return true;
         }
       } catch (_reattachErr) {
@@ -738,6 +799,7 @@ export default {
           session: { credential: "_reconnect:" + saved.token },
           keptSessions: ["credential"],
         });
+        await this.waitForConnectorFree();
         return true;
       } catch (_reconnectErr) {
         void _reconnectErr;

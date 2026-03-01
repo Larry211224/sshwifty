@@ -696,10 +696,15 @@ class Wizard {
       "connect.succeed"(rd, commandHandler) {
         self.connectionSucceed = true;
 
+        const displayName =
+          (configInput.displayUser || configInput.user) +
+          "@" +
+          configInput.host;
+
         self.step.resolve(
           self.stepSuccessfulDone(
             new command.Result(
-              configInput.user + "@" + configInput.host,
+              displayName,
               self.info,
               self.controls.build({
                 charset: configInput.charset,
@@ -1057,6 +1062,7 @@ class Executer extends Wizard {
         sd,
         {
           user: self.config.user,
+          displayUser: self.config.displayUser,
           authentication: self.config.authentication,
           host: self.config.host,
           charset: self.config.charset ? self.config.charset : "utf-8",

@@ -81,18 +81,26 @@ type PersistentSession struct {
 }
 
 // Attach sets the output channel for live streaming to a WebSocket.
+// Closes any previously attached channel so old goroutines can exit.
 func (ps *PersistentSession) Attach(ch chan []byte) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	if ps.outputCh != nil {
+		close(ps.outputCh)
+	}
 	ps.outputCh = ch
 	ps.DetachedAt = time.Time{}
 }
 
 // Detach removes the output channel; output goes only to the ring buffer.
+// Closes the channel so the relay goroutine can exit.
 func (ps *PersistentSession) Detach() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	ps.outputCh = nil
+	if ps.outputCh != nil {
+		close(ps.outputCh)
+		ps.outputCh = nil
+	}
 	ps.DetachedAt = time.Now()
 }
 
@@ -144,6 +152,15 @@ func (ps *PersistentSession) Close() {
 	})
 }
 
+// safeSend attempts to send on ch, recovering from panic if ch was closed.
+func safeSend(ch chan []byte, data []byte) {
+	defer func() { recover() }()
+	select {
+	case ch <- data:
+	default:
+	}
+}
+
 // pumpOutput reads from the SSH stdout pipe, writes to ring buffer,
 // and forwards to the attached WebSocket channel (if any).
 func (ps *PersistentSession) pumpOutput(r io.Reader, isStderr bool) {
@@ -161,7 +178,6 @@ func (ps *PersistentSession) pumpOutput(r io.Reader, isStderr bool) {
 			ps.mu.Unlock()
 
 			if ch != nil {
-				// Tag byte: 0x00 = stdout, 0x01 = stderr
 				tag := byte(0x00)
 				if isStderr {
 					tag = 0x01
@@ -170,11 +186,7 @@ func (ps *PersistentSession) pumpOutput(r io.Reader, isStderr bool) {
 				tagged[0] = tag
 				copy(tagged[1:], data)
 
-				select {
-				case ch <- tagged:
-				default:
-					// Drop data if channel is full; better than blocking SSH
-				}
+				safeSend(ch, tagged)
 			}
 		}
 		if err != nil {
