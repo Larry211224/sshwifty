@@ -27,7 +27,7 @@
 }
 
 #connect-new li .lst-wrap:hover {
-  background: #544;
+  background: #2a3a3a;
 }
 
 #connect-new li .lst-wrap:active {
@@ -41,7 +41,7 @@
 }
 
 #connect-new li h2 {
-  color: #e9a;
+  color: #5cf;
 }
 
 #connect-new li h2::before {

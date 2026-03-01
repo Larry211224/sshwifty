@@ -55,14 +55,14 @@
 
 #conn-status h1 {
   padding: 15px 15px 10px 15px;
-  background: #a56;
+  background: #2a7;
 }
 
 #conn-status-info {
   padding: 0 15px 15px 15px;
   font-size: 0.9em;
   line-height: 1.5;
-  background: #a56;
+  background: #2a7;
 }
 
 #conn-status.green:before {
@@ -182,8 +182,8 @@
 }
 
 #conn-status-delay-chart-background {
-  --color-start: #e43989;
-  --color-stop: #9a5fca;
+  --color-start: #2a9d8f;
+  --color-stop: #5cf;
 }
 
 #conn-status-delay-chart > g {
@@ -205,8 +205,8 @@
 }
 
 #conn-status-traffic-chart-out-background {
-  --color-start: #e46226;
-  --color-stop: #da356c;
+  --color-start: #e07628;
+  --color-stop: #f0a040;
 }
 
 #conn-status-traffic-chart-out > g {

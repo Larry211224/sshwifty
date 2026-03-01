@@ -114,7 +114,7 @@ body {
   margin: 0;
   height: 100%;
   color: #aaa;
-  border-bottom: 1px solid #a56;
+  border-bottom: 1px solid #2a7;
   background: #333;
   padding: 0 10px;
   position: relative;
@@ -146,9 +146,9 @@ body {
 
 .tab2 > li.active {
   color: #fff;
-  background: #644;
+  background: #234;
   margin-bottom: -1px;
-  border-color: #a56;
+  border-color: #2a7;
   border-style: solid;
   box-shadow: 0 -2px 2px #0002;
 }
@@ -260,7 +260,7 @@ body {
 
 .icon.icon-plus1 {
   color: #fff;
-  background: #a56;
+  background: #2a7;
 }
 
 .icon.icon-plus1::before {
@@ -331,7 +331,7 @@ body {
 }
 
 .window.window1 {
-  background: #a56;
+  background: #2a7;
   box-shadow: 0 0 5px #0006;
   color: #fff;
   font-size: 1em;
@@ -349,7 +349,7 @@ body {
   content: " ";
   width: 10px;
   height: 10px;
-  background: #a56;
+  background: #2a7;
   transform: rotate(45deg);
 }
 
@@ -363,18 +363,18 @@ body {
   font-size: 0.9em;
   font-weight: bold;
   text-transform: uppercase;
-  color: #e9a;
+  color: #5cf;
 }
 
 .window.window1 .window-close {
   position: absolute;
   top: 10px;
   right: 10px;
-  border-color: #844;
+  border-color: #1a6a5a;
   cursor: pointer;
 }
 .window.window1 .window-close::after {
-  border-color: #844;
+  border-color: #1a6a5a;
 }
 
 /* Form1 */
@@ -515,7 +515,7 @@ body {
 }
 
 .form1 > fieldset .field > .message > a {
-  color: #e9a;
+  color: #5cf;
 }
 
 .form1 > fieldset .field.highlight > input[type="text"],
@@ -570,7 +570,7 @@ body {
 .form1 > fieldset .field > input[type="radio"]:active,
 .form1 > fieldset .field > input[type="checkbox"]:focus,
 .form1 > fieldset .field > input[type="radio"]:focus {
-  outline: 1px solid #e9a;
+  outline: 1px solid #5cf;
 }
 
 .form1 > fieldset .field > input[type="text"]:focus,
@@ -583,27 +583,27 @@ body {
 .form1 > fieldset .field > select:focus,
 .form1 > fieldset .field > textarea:focus {
   background: #222;
-  border-bottom: 2px solid #e9a;
+  border-bottom: 2px solid #5cf;
 }
 
 .form1 > fieldset .field > button {
   padding: 8px 13px;
   font-weight: normal;
-  background: #c78;
-  border-color: #c78;
+  background: #3b8;
+  border-color: #3b8;
   border-width: 2px;
   border-style: solid;
 }
 
 .form1 > fieldset .field > button:focus,
 .form1 > fieldset .field > button:hover {
-  border-color: #a56;
-  background: #c78;
+  border-color: #2a7;
+  background: #3b8;
 }
 
 .form1 > fieldset .field > button:active {
-  background: #a56;
-  border-color: #a56;
+  background: #2a7;
+  border-color: #2a7;
 }
 
 .form1 > fieldset .field > button.secondary {

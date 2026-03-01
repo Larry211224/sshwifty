@@ -241,7 +241,7 @@
   font-size: 11px;
   transition: color 0.1s;
 }
-.breadcrumb-item:hover { color: #e9a; }
+.breadcrumb-item:hover { color: #5cf; }
 .breadcrumb-item::after { content: " / "; color: #444; }
 .breadcrumb-item:last-child::after { content: ""; }
 .breadcrumb-item:last-child { color: #ccc; }
@@ -324,8 +324,8 @@
   border-radius: 3px;
 }
 .file-icon-dir {
-  background: #e9a;
-  color: #533;
+  background: #5cf;
+  color: #1a3040;
 }
 .file-icon-file {
   background: #ffffff15;
@@ -454,10 +454,10 @@
   flex-shrink: 0;
 }
 .file-panel-resize:hover {
-  background: #ee9a4040;
+  background: #55ccff40;
 }
 .file-panel-resize:active {
-  background: #ee9a6060;
+  background: #55ccff60;
 }
 
 /* SFTP floating pill button */
@@ -486,15 +486,15 @@
 
 .sftp-pill:hover {
   color: #2a2a2a;
-  background: #e9a;
-  border-color: #e9a;
-  box-shadow: 0 2px 12px rgba(238, 153, 170, 0.35);
+  background: #5cf;
+  border-color: #5cf;
+  box-shadow: 0 2px 12px rgba(85, 204, 255, 0.35);
   transform: translateX(-50%) translateY(-1px);
 }
 
 .sftp-pill:active {
   transform: translateX(-50%) translateY(0);
-  box-shadow: 0 1px 4px rgba(238, 153, 170, 0.25);
+  box-shadow: 0 1px 4px rgba(85, 204, 255, 0.25);
 }
 
 /* Drag-and-drop overlay */
@@ -513,7 +513,7 @@
 }
 
 .drop-overlay-text {
-  color: #e9a;
+  color: #5cf;
   font-size: 18px;
   font-weight: bold;
   padding: 20px 40px;

@@ -26,7 +26,7 @@
 #connector-cancel {
   display: inline-block;
   text-decoration: none;
-  color: #e9a;
+  color: #5cf;
   margin-right: 40px;
 }
 
@@ -47,7 +47,7 @@
 }
 
 #connector-title > h2 {
-  color: #e9a;
+  color: #5cf;
   font-size: 1.3em;
   font-weight: bold;
   margin: 3px 0;
@@ -85,7 +85,7 @@
 #connector-proccess-message > h2 {
   font-weight: normal;
   margin: 10px 0;
-  color: #e9a;
+  color: #5cf;
   font-size: 1.2em;
 }
 
@@ -101,11 +101,11 @@
   }
 
   50% {
-    outline: 2px solid #e9a;
+    outline: 2px solid #5cf;
   }
 
   60% {
-    border-color: #e9a;
+    border-color: #5cf;
     outline: none;
   }
 }

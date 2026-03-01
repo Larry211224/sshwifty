@@ -89,6 +89,9 @@
           <hr />
           <p class="secondary" v-html="serverMessage"></p>
         </div>
+
+        <hr />
+        <p class="secondary">Maintained by Larry Gao</p>
       </div>
     </screens>
 

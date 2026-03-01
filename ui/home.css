@@ -220,15 +220,15 @@
 
 @keyframes home-hd-plus-icon-flash {
   0% {
-    background: #a56;
+    background: #2a7;
   }
 
   20% {
-    background: #5a7;
+    background: #38c;
   }
 
   40% {
-    background: #96a;
+    background: #2b9;
   }
 
   60% {
@@ -236,17 +236,17 @@
   }
 
   80% {
-    background: #da0;
+    background: #5ae;
   }
 
   100% {
-    background: #a56;
+    background: #2a7;
   }
 }
 
 #home-hd-plus.working {
   color: #fff;
-  background: #a56;
+  background: #2a7;
   animation-name: home-hd-plus-icon-flash;
   animation-duration: 10s;
   animation-iteration-count: infinite;
@@ -403,7 +403,7 @@
 }
 
 #home-content p a {
-  color: #e9a;
+  color: #5cf;
 }
 
 #home-content hr {
