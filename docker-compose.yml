@@ -1,0 +1,14 @@
+services:
+  sshwifty:
+    image: sshwifty:dev
+    container_name: sshwifty
+    build: ./
+    restart: unless-stopped
+    environment:
+      - SSHWIFTY_SHAREDKEY=211224
+      - SSHWIFTY_LISTENINTERFACE=0.0.0.0
+      - SSHWIFTY_LISTENPORT=8182
+    ports:
+      - "8182:8182/tcp"
+    stdin_open: true
+    tty: true
