@@ -1,13 +1,13 @@
 # Build the build base environment
-FROM ubuntu:rolling AS base
+FROM ubuntu:24.04 AS base
 RUN set -ex && \
     cd / && \
     echo '#!/bin/sh' > /try.sh && echo 'res=1; for i in $(seq 0 36); do $@; res=$?; [ $res -eq 0 ] && exit $res || sleep 10; done; exit $res' >> /try.sh && chmod +x /try.sh && \
     echo '#!/bin/sh' > /child.sh && echo 'cpid=""; ret=0; i=0; for c in "$@"; do ( (((((eval "$c"; echo $? >&3) | sed "s/^/|-($i) /" >&4) 2>&1 | sed "s/^/|-($i)!/" >&2) 3>&1) | (read xs; exit $xs)) 4>&1) & ppid=$!; cpid="$cpid $ppid"; echo "+ Child $i (PID $ppid): $c ..."; i=$((i+1)); done; for c in $cpid; do wait $c; cret=$?; [ $cret -eq 0 ] && continue; echo "* Child PID $c has failed." >&2; ret=$cret; done; exit $ret' >> /child.sh && chmod +x /child.sh && \
     export PATH=$PATH:/ && \
     export DEBIAN_FRONTEND=noninteractive && \
-    sed -i 's|http://archive.ubuntu.com|https://mirrors.aliyun.com|g; s|http://security.ubuntu.com|https://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null; \
-    ([ -f /etc/apt/sources.list.d/ubuntu.sources ] && sed -i 's|http://archive.ubuntu.com|https://mirrors.aliyun.com|g; s|http://security.ubuntu.com|https://mirrors.aliyun.com|g; s|URIs: .*|URIs: https://mirrors.aliyun.com/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources) || true && \
+    sed -i 's|http://archive.ubuntu.com|https://mirrors.ustc.edu.cn|g; s|http://security.ubuntu.com|https://mirrors.ustc.edu.cn|g' /etc/apt/sources.list 2>/dev/null; \
+    ([ -f /etc/apt/sources.list.d/ubuntu.sources ] && sed -i 's|URIs: .*|URIs: https://mirrors.ustc.edu.cn/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources) || true && \
     ([ -z "$HTTP_PROXY" ] || (echo "Acquire::http::Proxy \"$HTTP_PROXY\";" >> /etc/apt/apt.conf)) && \
     ([ -z "$HTTPS_PROXY" ] || (echo "Acquire::https::Proxy \"$HTTPS_PROXY\";" >> /etc/apt/apt.conf)) && \
     (echo "Acquire::Retries \"8\";" >> /etc/apt/apt.conf) && \
