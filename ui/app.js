@@ -39,34 +39,6 @@ const maxTimeDiff = 30000;
 
 const updateIndicatorMaxDisplayTime = 3000;
 
-const AUTH_STORAGE_KEY = "sshwifty_auth_passphrase";
-
-function savePassphrase(passphrase) {
-  try {
-    localStorage.setItem(AUTH_STORAGE_KEY, btoa(passphrase));
-  } catch (e) {
-    void e;
-  }
-}
-
-function loadPassphrase() {
-  try {
-    const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-    return stored ? atob(stored) : null;
-  } catch (e) {
-    void e;
-    return null;
-  }
-}
-
-function clearPassphrase() {
-  try {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-  } catch (e) {
-    void e;
-  }
-}
-
 const mainTemplate = `
 <home
   v-if="page == 'app'"
@@ -360,15 +332,9 @@ function startApp(rootEl) {
               });
               break;
 
-            case 403: {
-              const saved = loadPassphrase();
-              if (saved) {
-                await this.submitAuth(saved);
-              } else {
-                this.page = "auth";
-              }
+            case 403:
+              this.page = "auth";
               break;
-            }
 
             case 0:
               setTimeout(() => {
@@ -392,7 +358,6 @@ function startApp(rootEl) {
           let self = this;
           switch (result.result) {
             case 200:
-              savePassphrase(passphrase);
               this.executeHomeApp(result, {
                 async fetch() {
                   let result = await self.doAuth(passphrase);
@@ -413,9 +378,7 @@ function startApp(rootEl) {
               break;
 
             case 403:
-              clearPassphrase();
               this.authErr = "Authentication has failed. Wrong passphrase?";
-              this.page = "auth";
               break;
 
             default:
