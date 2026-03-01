@@ -39,6 +39,15 @@ export function build(ctx) {
     if (!rec) {
       rec = [];
     }
+
+    // Filter out stale reattach entries from history
+    const beforeLen = rec.length;
+    rec = rec.filter(
+      (r) => !r.data || !r.data.user || !r.data.user.startsWith("_reattach:"),
+    );
+    if (rec.length !== beforeLen) {
+      localStorage.setItem("sshwifty-knowns", JSON.stringify(rec));
+    }
   } catch (e) {
     alert("Unable to load data of Known remotes: " + e);
   }

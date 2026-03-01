@@ -720,15 +720,17 @@ class Wizard {
           ),
         );
 
-        self.history.save(
-          self.info.name() + ":" + configInput.user + "@" + configInput.host,
-          configInput.user + "@" + configInput.host,
-          new Date(),
-          self.info,
-          configInput,
-          sessionData,
-          keptSessions,
-        );
+        if (!configInput.user.startsWith("_reattach:")) {
+          self.history.save(
+            self.info.name() + ":" + configInput.user + "@" + configInput.host,
+            configInput.user + "@" + configInput.host,
+            new Date(),
+            self.info,
+            configInput,
+            sessionData,
+            keptSessions,
+          );
+        }
       },
       async "connect.fingerprint"(rd, sd) {
         self.step.resolve(

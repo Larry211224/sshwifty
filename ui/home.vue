@@ -68,30 +68,33 @@
       @updated="tabUpdated"
     >
       <div id="home-content-wrap">
-        <h1>Hi, this is Sshwifty</h1>
+        <div v-if="reconnecting" id="home-reconnecting"></div>
+        <template v-else>
+          <h1>Hi, this is Sshwifty</h1>
 
-        <p>
-          An Open Source Web SSH Client that enables you to connect to SSH
-          servers without downloading any additional software.
-        </p>
+          <p>
+            An Open Source Web SSH Client that enables you to connect to SSH
+            servers without downloading any additional software.
+          </p>
 
-        <p>
-          To get started, click the
-          <span
-            id="home-content-connect"
-            class="icon icon-plus1"
-            @click="showConnectWindow"
-          ></span>
-          icon near the top left corner.
-        </p>
+          <p>
+            To get started, click the
+            <span
+              id="home-content-connect"
+              class="icon icon-plus1"
+              @click="showConnectWindow"
+            ></span>
+            icon near the top left corner.
+          </p>
 
-        <div v-if="serverMessage.length > 0">
+          <div v-if="serverMessage.length > 0">
+            <hr />
+            <p class="secondary" v-html="serverMessage"></p>
+          </div>
+
           <hr />
-          <p class="secondary" v-html="serverMessage"></p>
-        </div>
-
-        <hr />
-        <p class="secondary">Maintained by Larry Gao</p>
+          <p class="secondary">Maintained by Larry Gao</p>
+        </template>
       </div>
     </screens>
 
@@ -208,8 +211,31 @@ export default {
   data() {
     let history = home_history.build(this);
 
+    let hasRecoverableSessions = false;
+    try {
+      const maxAge = 12 * 60 * 60 * 1000;
+      const rawTabs = sessionStorage.getItem("sshwifty_auto_reconnect_tabs");
+      if (rawTabs) {
+        const tabs = JSON.parse(rawTabs);
+        hasRecoverableSessions = Array.isArray(tabs) && tabs.some(
+          (t) => t.token && Date.now() - (t.ts || 0) <= maxAge,
+        );
+      }
+      if (!hasRecoverableSessions) {
+        const rawSingle = sessionStorage.getItem("sshwifty_auto_reconnect");
+        if (rawSingle) {
+          const single = JSON.parse(rawSingle);
+          hasRecoverableSessions =
+            single.token && Date.now() - (single.ts || 0) <= maxAge;
+        }
+      }
+    } catch (_e) {
+      void _e;
+    }
+
     return {
       ticker: null,
+      reconnecting: hasRecoverableSessions,
       windows: {
         delay: false,
         connect: false,
@@ -247,7 +273,7 @@ export default {
         this.$emit("navigate-to", "");
       });
     } else {
-      setTimeout(() => this.tryAutoReconnect(), 500);
+      this.tryAutoReconnect();
     }
 
     window.addEventListener("beforeunload", this.onBrowserClose);
@@ -630,17 +656,38 @@ export default {
           }
         }
 
-        if (entries.length === 0) return;
+        if (entries.length === 0) {
+          this.reconnecting = false;
+          return;
+        }
 
         const maxAge = 12 * 60 * 60 * 1000;
-
-        for (const saved of entries) {
+        const validEntries = entries.filter((saved) => {
           const elapsed = Date.now() - (saved.ts || 0);
-          if (elapsed > maxAge || !saved.token) continue;
+          return elapsed <= maxAge && saved.token;
+        });
 
-          await this.tryReattachOrReconnect(saved);
+        if (validEntries.length === 0) {
+          this.reconnecting = false;
+          return;
+        }
+
+        let anySuccess = false;
+        for (const saved of validEntries) {
+          const ok = await this.tryReattachOrReconnect(saved);
+          if (ok) anySuccess = true;
+        }
+
+        if (!anySuccess) {
+          this.reconnecting = false;
+        } else {
+          // Safety fallback: hide overlay after 5s if tab hasn't appeared
+          setTimeout(() => {
+            this.reconnecting = false;
+          }, 5000);
         }
       } catch (_e) {
+        this.reconnecting = false;
         sessionStorage.removeItem("sshwifty_auto_reconnect");
         sessionStorage.removeItem("sshwifty_auto_reconnect_tabs");
       }
@@ -669,7 +716,7 @@ export default {
             session: { credential: "" },
             keptSessions: [],
           });
-          return;
+          return true;
         }
       } catch (_reattachErr) {
         void _reattachErr;
@@ -680,7 +727,7 @@ export default {
         const resp = await fetch(
           "/sshwifty/reconnect?token=" + encodeURIComponent(saved.token),
         );
-        if (!resp.ok) return;
+        if (!resp.ok) return false;
         await resp.json();
 
         this.connectKnown({
@@ -691,8 +738,10 @@ export default {
           session: { credential: "_reconnect:" + saved.token },
           keptSessions: ["credential"],
         });
+        return true;
       } catch (_reconnectErr) {
         void _reconnectErr;
+        return false;
       }
     },
     async addToTab(data) {
@@ -714,6 +763,10 @@ export default {
           },
         }) - 1,
       );
+
+      if (this.reconnecting) {
+        this.reconnecting = false;
+      }
     },
     removeFromTab(index) {
       let isLast = index === this.tab.tabs.length - 1;
