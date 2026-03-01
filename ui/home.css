@@ -90,9 +90,17 @@
   font-size: 1.1em;
   padding: 0 0 0 20px;
   font-weight: bold;
-  flex: 0 0 65px;
+  flex: 0 0 auto;
   text-align: center;
   overflow: hidden;
+  white-space: nowrap;
+}
+
+#home-hd-author {
+  font-size: 0.6em;
+  font-weight: normal;
+  color: #999;
+  margin-left: 2px;
 }
 
 #home-hd-delay {
@@ -112,6 +120,10 @@
 @media (max-width: 768px) {
   #home-hd-title {
     padding: 0 0 0 10px;
+  }
+
+  #home-hd-author {
+    display: none;
   }
 
   #home-hd-delay {
