@@ -40,14 +40,10 @@ const maxTimeDiff = 30000;
 const updateIndicatorMaxDisplayTime = 3000;
 
 const AUTH_STORAGE_KEY = "sshwifty_auth_passphrase";
-const AUTH_EXPIRY_KEY = "sshwifty_auth_expiry";
-// 7 days in milliseconds
-const AUTH_TTL = 7 * 24 * 60 * 60 * 1000;
 
 function savePassphrase(passphrase) {
   try {
     localStorage.setItem(AUTH_STORAGE_KEY, btoa(passphrase));
-    localStorage.setItem(AUTH_EXPIRY_KEY, String(Date.now() + AUTH_TTL));
   } catch (e) {
     void e;
   }
@@ -55,12 +51,6 @@ function savePassphrase(passphrase) {
 
 function loadPassphrase() {
   try {
-    const expiry = localStorage.getItem(AUTH_EXPIRY_KEY);
-    if (!expiry || Date.now() > Number(expiry)) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      localStorage.removeItem(AUTH_EXPIRY_KEY);
-      return null;
-    }
     const stored = localStorage.getItem(AUTH_STORAGE_KEY);
     return stored ? atob(stored) : null;
   } catch (e) {
@@ -72,7 +62,6 @@ function loadPassphrase() {
 function clearPassphrase() {
   try {
     localStorage.removeItem(AUTH_STORAGE_KEY);
-    localStorage.removeItem(AUTH_EXPIRY_KEY);
   } catch (e) {
     void e;
   }
