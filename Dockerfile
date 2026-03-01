@@ -13,7 +13,7 @@ RUN set -ex && \
     echo '#!/bin/sh' > /install.sh && echo 'apt-get -y update && apt-get -y --fix-broken install autoconf automake libtool build-essential ca-certificates curl git nodejs npm golang-go libvips libvips-dev' >> /install.sh && chmod +x /install.sh && \
     /try.sh /install.sh && rm /install.sh && \
     /try.sh update-ca-certificates -f && c_rehash && \
-    npm config set registry https://registry.npmmirror.com && \
+    npm config set registry https://registry.npmjs.org && \
     ([ -z "$HTTP_PROXY" ] || (git config --global http.proxy "$HTTP_PROXY" && npm config set proxy "$HTTP_PROXY")) && \
     ([ -z "$HTTPS_PROXY" ] || (git config --global https.proxy "$HTTPS_PROXY" && npm config set https-proxy "$HTTPS_PROXY")) && \
     export GOPROXY=https://goproxy.cn,direct && \
