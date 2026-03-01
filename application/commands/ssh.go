@@ -57,7 +57,8 @@ const (
 
 // Server -> client markers
 const (
-	SSHServerSessionID = 0x07
+	SSHServerSessionID      = 0x07
+	SSHServerReattachReplay = 0x08
 )
 
 const (
@@ -181,6 +182,7 @@ type sshClient struct {
 	resolvedAuth       []ssh.AuthMethod
 	rawCredential      string
 	rawAuthMethodType  byte
+	persistentSession  *PersistentSession
 }
 
 func newSSH(
@@ -249,6 +251,33 @@ func (d *sshClient) Bootup(
 	}
 
 	userNameStr := string(userName.Data())
+
+	// Check for reattach: username format is "_reattach:<token>"
+	if strings.HasPrefix(userNameStr, "_reattach:") {
+		token := userNameStr[len("_reattach:"):]
+		ps, ok := GlobalPersistentSessions.GetByToken(token)
+		if !ok || ps.IsClosed() {
+			return nil, command.ToFSMError(
+				errors.New("session not found or expired"),
+				SSHRequestErrorBadUserName)
+		}
+
+		// Drain the remaining bootup data (address + auth method)
+		for !r.Completed() {
+			_, drainErr := r.Buffered()
+			if drainErr != nil {
+				break
+			}
+		}
+
+		d.persistentSession = ps
+		d.sessionID = ps.ID
+
+		d.remoteCloseWait.Add(1)
+		go d.reattach(ps)
+
+		return d.local, command.NoFSMError()
+	}
 
 	// Address
 	addr, addrErr := ParseAddress(r.Read, (*sBuf)[:sshMaxHostnameLen])
@@ -477,7 +506,11 @@ func (d *sshClient) remote(
 	defer func() {
 		d.w.Signal(command.HeaderClose)
 		close(d.remoteConnReceive)
-		d.baseCtxCancel()
+		// Don't cancel baseCtx if we have a persistent session;
+		// the session should keep running.
+		if d.persistentSession == nil {
+			d.baseCtxCancel()
+		}
 		d.remoteCloseWait.Done()
 	}()
 
@@ -505,8 +538,6 @@ func (d *sshClient) remote(
 		return
 	}
 
-	errOutWg := sync.WaitGroup{}
-	defer errOutWg.Wait()
 
 	conn, clearConnInitialDeadline, err :=
 		d.dialRemote("tcp", address, &ssh.ClientConfig{
@@ -523,32 +554,16 @@ func (d *sshClient) remote(
 		d.l.Debug("Unable to connect to remote machine: %s", err)
 		return
 	}
-	defer conn.Close()
-
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-d.baseCtx.Done():
-				return
-			case <-ticker.C:
-				_, _, err := conn.SendRequest("keepalive@openssh.com", true, nil)
-				if err != nil {
-					return
-				}
-			}
-		}
-	}()
+	// SSH connection lifecycle is now managed by PersistentSession
 
 	session, err := conn.NewSession()
 	if err != nil {
+		conn.Close()
 		errLen := copy((*u)[d.w.HeaderSize():], err.Error()) + d.w.HeaderSize()
 		d.w.SendManual(SSHServerConnectFailed, (*u)[:errLen])
 		d.l.Debug("Unable open new session on remote machine: %s", err)
 		return
 	}
-	defer session.Close()
 
 	in, err := session.StdinPipe()
 	if err != nil {
@@ -595,16 +610,15 @@ func (d *sshClient) remote(
 		d.l.Debug("Unable to start Shell: %s", err)
 		return
 	}
-	defer session.Wait()
 
 	clearConnInitialDeadline()
 
 	d.remoteConnReceive <- sshRemoteConn{
 		writer: in,
 		closer: func() error {
-			session.Close()
-
-			return conn.Close()
+			// Don't close SSH when using persistent sessions;
+			// the PersistentSession owns the connection lifecycle.
+			return nil
 		},
 		session:   session,
 		sshClient: conn,
@@ -624,7 +638,6 @@ func (d *sshClient) remote(
 		AuthMethod: d.resolvedAuth,
 		HostKey:    ssh.InsecureIgnoreHostKey(),
 	})
-	defer GlobalSessions.Unregister(d.sessionID)
 
 	authMethodStr := "none"
 	switch d.rawAuthMethodType {
@@ -640,8 +653,31 @@ func (d *sshClient) remote(
 		User:       user,
 		Credential: d.rawCredential,
 		AuthMethod: authMethodStr,
-		ExpiresAt:  time.Now().Add(30 * time.Minute),
+		ExpiresAt:  time.Now().Add(12 * time.Hour),
 	})
+
+	// Create persistent session
+	outputCh := make(chan []byte, 256)
+	ps := &PersistentSession{
+		ID:         d.sessionID,
+		Token:      reconnectToken,
+		Client:     conn,
+		Session:    session,
+		Stdin:      in,
+		Stdout:     out,
+		Stderr:     errOut,
+		Output:     NewRingBuffer(ringBufferSize),
+		Cols:       40,
+		Rows:       80,
+		ExpiresAt:  time.Now().Add(persistentSessionTTL),
+		Address:    address,
+		User:       user,
+	}
+	ps.Attach(outputCh)
+	ps.Start()
+
+	GlobalPersistentSessions.Register(ps)
+	d.persistentSession = ps
 
 	combined := d.sessionID + "\n" + reconnectToken
 	combinedBytes := []byte(combined)
@@ -651,37 +687,105 @@ func (d *sshClient) remote(
 		return
 	}
 
-	d.l.Debug("Serving (session %s)", d.sessionID)
+	d.l.Debug("Serving persistent session %s", d.sessionID)
 
-	errOutWg.Add(1)
-	go func() {
-		defer errOutWg.Done()
-		u := d.bufferPool.Get()
-		defer d.bufferPool.Put(u)
-
-		for {
-			rLen, err := errOut.Read((*u)[d.w.HeaderSize():])
-			if err != nil {
-				return
-			}
-
-			err = d.w.SendManual(
-				SSHServerRemoteStdErr, (*u)[:d.w.HeaderSize()+rLen])
-			if err != nil {
-				return
-			}
+	// Relay output from persistent session channel to WebSocket
+	for tagged := range outputCh {
+		if len(tagged) < 2 {
+			continue
 		}
-	}()
-
-	for {
-		rLen, rErr := out.Read((*u)[d.w.HeaderSize():])
-		if rErr != nil {
+		tag := tagged[0]
+		data := tagged[1:]
+		marker := SSHServerRemoteStdOut
+		if tag == 0x01 {
+			marker = SSHServerRemoteStdErr
+		}
+		dataLen := copy((*u)[d.w.HeaderSize():], data) + d.w.HeaderSize()
+		wErr = d.w.SendManual(byte(marker), (*u)[:dataLen])
+		if wErr != nil {
+			// WebSocket write failed (disconnected); detach and exit
+			ps.Detach()
 			return
 		}
+	}
+}
 
-		rErr = d.w.SendManual(
-			SSHServerRemoteStdOut, (*u)[:d.w.HeaderSize()+rLen])
-		if rErr != nil {
+// reattach reconnects to an existing persistent session, replays buffered
+// output, and starts relaying live data.
+func (d *sshClient) reattach(ps *PersistentSession) {
+	u := d.bufferPool.Get()
+	defer d.bufferPool.Put(u)
+
+	defer func() {
+		d.w.Signal(command.HeaderClose)
+		close(d.remoteConnReceive)
+		d.remoteCloseWait.Done()
+	}()
+
+	// Provide a remote conn so the local handler can write input
+	d.remoteConnReceive <- sshRemoteConn{
+		writer: ps.Stdin,
+		closer: func() error {
+			return nil
+		},
+		session:   ps.Session,
+		sshClient: ps.Client,
+	}
+
+	// Signal connection success
+	wErr := d.w.SendManual(
+		SSHServerConnectSucceed, (*u)[:d.w.HeaderSize()])
+	if wErr != nil {
+		return
+	}
+
+	// Send session ID + token
+	combined := ps.ID + "\n" + ps.Token
+	combinedBytes := []byte(combined)
+	combinedLen := copy((*u)[d.w.HeaderSize():], combinedBytes) + d.w.HeaderSize()
+	wErr = d.w.SendManual(SSHServerSessionID, (*u)[:combinedLen])
+	if wErr != nil {
+		return
+	}
+
+	// Replay buffered output
+	snapshot := ps.Output.Snapshot()
+	for start := 0; start < len(snapshot); {
+		maxChunk := len((*u)) - d.w.HeaderSize()
+		end := start + maxChunk
+		if end > len(snapshot) {
+			end = len(snapshot)
+		}
+		chunk := snapshot[start:end]
+		dataLen := copy((*u)[d.w.HeaderSize():], chunk) + d.w.HeaderSize()
+		wErr = d.w.SendManual(SSHServerRemoteStdOut, (*u)[:dataLen])
+		if wErr != nil {
+			ps.Detach()
+			return
+		}
+		start = end
+	}
+
+	// Attach and relay live output
+	outputCh := make(chan []byte, 256)
+	ps.Attach(outputCh)
+
+	d.l.Debug("Reattached to persistent session %s", ps.ID)
+
+	for tagged := range outputCh {
+		if len(tagged) < 2 {
+			continue
+		}
+		tag := tagged[0]
+		data := tagged[1:]
+		marker := SSHServerRemoteStdOut
+		if tag == 0x01 {
+			marker = SSHServerRemoteStdErr
+		}
+		dataLen := copy((*u)[d.w.HeaderSize():], data) + d.w.HeaderSize()
+		wErr = d.w.SendManual(byte(marker), (*u)[:dataLen])
+		if wErr != nil {
+			ps.Detach()
 			return
 		}
 	}
@@ -831,6 +935,14 @@ func (d *sshClient) Close() error {
 		close(d.fingerprintVerifyResultReceive)
 
 		d.fingerprintVerifyResultReceiveClosed = true
+	}
+
+	// When we have a persistent session, just detach instead of closing SSH
+	if d.persistentSession != nil {
+		d.persistentSession.Detach()
+		d.baseCtxCancel()
+		d.remoteCloseWait.Wait()
+		return nil
 	}
 
 	remote, remoteErr := d.getRemote()

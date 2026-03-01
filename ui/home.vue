@@ -522,72 +522,177 @@ export default {
     saveAutoReconnect() {
       try {
         const tabs = this.tab.tabs;
-        if (tabs.length === 0) return;
-        const lastTab = tabs[tabs.length - 1];
-        const control = lastTab.control;
-        if (!control || !control.reconnectToken) return;
+        if (tabs.length === 0) {
+          sessionStorage.removeItem("sshwifty_auto_reconnect_tabs");
+          return;
+        }
+
+        // Load existing saved tabs to preserve real user data
+        let existingMap = {};
+        try {
+          const raw = sessionStorage.getItem("sshwifty_auto_reconnect_tabs");
+          if (raw) {
+            const arr = JSON.parse(raw);
+            for (const entry of arr) {
+              if (entry.token) existingMap[entry.token] = entry;
+            }
+          }
+        } catch (_e) {
+          void _e;
+        }
 
         const knowns = this.connector.historyRec.all();
-        if (knowns.length === 0) return;
-        const latest = knowns[knowns.length - 1];
+        const entries = [];
 
-        sessionStorage.setItem(
-          "sshwifty_auto_reconnect",
-          JSON.stringify({
-            token: control.reconnectToken,
-            uid: latest.uid,
-            title: latest.title,
-            type: latest.type,
-            data: {
-              host: latest.data.host,
-              user: latest.data.user,
-              authentication: latest.data.authentication,
-              charset: latest.data.charset,
-              fingerprint: latest.data.fingerprint,
-              tabColor: latest.data.tabColor,
-            },
+        for (let i = 0; i < tabs.length; i++) {
+          const control = tabs[i].control;
+          if (!control || !control.reconnectToken) continue;
+
+          const token = control.reconnectToken;
+          let userData = null;
+
+          // Find matching known entry for this tab
+          const tabName = tabs[i].name || "";
+          for (let k = knowns.length - 1; k >= 0; k--) {
+            const kn = knowns[k];
+            if (!kn.data || !kn.data.user) continue;
+            if (kn.data.user.startsWith("_reattach:")) continue;
+            const knTitle = kn.data.user + "@" + kn.data.host;
+            if (tabName.indexOf(kn.data.host) >= 0 || k === knowns.length - 1) {
+              userData = {
+                host: kn.data.host,
+                user: kn.data.user,
+                authentication: kn.data.authentication,
+                charset: kn.data.charset,
+                fingerprint: kn.data.fingerprint,
+                tabColor: kn.data.tabColor,
+              };
+              break;
+            }
+          }
+
+          // Fall back to existing saved data
+          if (!userData && existingMap[token]) {
+            userData = existingMap[token].data;
+          }
+
+          if (!userData) continue;
+
+          entries.push({
+            token: token,
+            title: tabs[i].name || "",
+            type: "SSH",
+            data: userData,
             ts: Date.now(),
-          }),
-        );
+          });
+        }
+
+        if (entries.length > 0) {
+          sessionStorage.setItem(
+            "sshwifty_auto_reconnect_tabs",
+            JSON.stringify(entries),
+          );
+        }
+
+        // Also save legacy format for single-tab backward compat
+        if (entries.length > 0) {
+          const first = entries[0];
+          sessionStorage.setItem(
+            "sshwifty_auto_reconnect",
+            JSON.stringify({
+              token: first.token,
+              uid: "",
+              title: first.title,
+              type: first.type,
+              data: first.data,
+              ts: Date.now(),
+            }),
+          );
+        }
       } catch (_e) {
         // sessionStorage may be unavailable
       }
     },
     async tryAutoReconnect() {
       try {
-        const raw = sessionStorage.getItem("sshwifty_auto_reconnect");
-        if (!raw) return;
-
-        const saved = JSON.parse(raw);
-        const elapsed = Date.now() - (saved.ts || 0);
-        const maxAge = 30 * 60 * 1000;
-        if (elapsed > maxAge) {
-          sessionStorage.removeItem("sshwifty_auto_reconnect");
-          return;
+        // Try multi-tab format first
+        let entries = [];
+        const rawTabs = sessionStorage.getItem(
+          "sshwifty_auto_reconnect_tabs",
+        );
+        if (rawTabs) {
+          entries = JSON.parse(rawTabs);
+        } else {
+          // Fall back to legacy single-tab format
+          const raw = sessionStorage.getItem("sshwifty_auto_reconnect");
+          if (raw) {
+            entries = [JSON.parse(raw)];
+          }
         }
 
-        if (!saved.token) return;
+        if (entries.length === 0) return;
 
+        const maxAge = 12 * 60 * 60 * 1000;
+
+        for (const saved of entries) {
+          const elapsed = Date.now() - (saved.ts || 0);
+          if (elapsed > maxAge || !saved.token) continue;
+
+          await this.tryReattachOrReconnect(saved);
+        }
+      } catch (_e) {
+        sessionStorage.removeItem("sshwifty_auto_reconnect");
+        sessionStorage.removeItem("sshwifty_auto_reconnect_tabs");
+      }
+    },
+    async tryReattachOrReconnect(saved) {
+      // Try reattach first (preserves SSH session + terminal history)
+      try {
+        const reattachResp = await fetch(
+          "/sshwifty/session/reattach?token=" +
+            encodeURIComponent(saved.token),
+        );
+        if (reattachResp.ok) {
+          await reattachResp.json();
+          this.connectKnown({
+            uid: saved.uid || "",
+            title: saved.title,
+            type: saved.type,
+            data: {
+              host: saved.data.host,
+              user: "_reattach:" + saved.token,
+              authentication: "None",
+              charset: saved.data.charset,
+              fingerprint: saved.data.fingerprint,
+              tabColor: saved.data.tabColor,
+            },
+            session: { credential: "" },
+            keptSessions: [],
+          });
+          return;
+        }
+      } catch (_reattachErr) {
+        void _reattachErr;
+      }
+
+      // Fall back to reconnect (new SSH session)
+      try {
         const resp = await fetch(
           "/sshwifty/reconnect?token=" + encodeURIComponent(saved.token),
         );
-        if (!resp.ok) {
-          sessionStorage.removeItem("sshwifty_auto_reconnect");
-          return;
-        }
-        // Consume the response body to release the connection
+        if (!resp.ok) return;
         await resp.json();
 
         this.connectKnown({
-          uid: saved.uid,
+          uid: saved.uid || "",
           title: saved.title,
           type: saved.type,
           data: saved.data,
           session: { credential: "_reconnect:" + saved.token },
           keptSessions: ["credential"],
         });
-      } catch (_e) {
-        sessionStorage.removeItem("sshwifty_auto_reconnect");
+      } catch (_reconnectErr) {
+        void _reconnectErr;
       }
     },
     async addToTab(data) {

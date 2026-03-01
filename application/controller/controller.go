@@ -50,6 +50,7 @@ type handler struct {
 	socketVerifyCtl socketVerification
 	sftpSocketCtl   sftpSocket
 	reconnectCtl    reconnectController
+	reattachCtl     reattachController
 }
 
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -109,6 +110,8 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err = serveController(h.sftpSocketCtl, &ctlResponder, r, clientLogger)
 	case "/sshwifty/reconnect":
 		err = serveController(h.reconnectCtl, &ctlResponder, r, clientLogger)
+	case "/sshwifty/session/reattach":
+		err = serveController(h.reattachCtl, &ctlResponder, r, clientLogger)
 	case "/robots.txt":
 		err = serveStaticCacheData(
 			"robots.txt",
@@ -160,6 +163,7 @@ const (
 func Builder(cmds command.Commands) server.HandlerBuilder {
 	socketBuffers := command.NewBufferPool(socketBufferSize)
 	commands.GlobalReconnectTokens.StartCleanupLoop()
+	commands.GlobalPersistentSessions.StartCleanupLoop()
 	return func(
 		commonCfg configuration.Common,
 		cfg configuration.Server,
@@ -176,6 +180,7 @@ func Builder(cmds command.Commands) server.HandlerBuilder {
 			socketVerifyCtl: newSocketVerification(socketCtl, cfg, commonCfg),
 			sftpSocketCtl:   newSFTPSocketCtl(cfg),
 			reconnectCtl:    reconnectController{},
+			reattachCtl:     reattachController{},
 		}
 	}
 }
