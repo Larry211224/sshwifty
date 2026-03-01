@@ -41,8 +41,8 @@ const updateIndicatorMaxDisplayTime = 3000;
 
 const AUTH_STORAGE_KEY = "sshwifty_auth_passphrase";
 const AUTH_EXPIRY_KEY = "sshwifty_auth_expiry";
-// Match reconnect token TTL (30 minutes)
-const AUTH_TTL = 30 * 60 * 1000;
+// Match reconnect token TTL (12 hours)
+const AUTH_TTL = 12 * 60 * 60 * 1000;
 
 function savePassphrase(passphrase) {
   try {
