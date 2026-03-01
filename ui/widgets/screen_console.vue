@@ -280,6 +280,7 @@ class Term {
       fontSize: this.fontSize,
       letterSpacing: 1,
       lineHeight: 1.3,
+      scrollback: 999999,
       logLevel: process.env.NODE_ENV === "development" ? "info" : "off",
       theme: {
         background: this.control.color(),
