@@ -18,7 +18,7 @@
 -->
 
 <template>
-  <div id="home">
+  <div id="home" :class="{ 'home-restoring': reconnecting }">
     <header id="home-header">
       <h1 id="home-hd-title">Sshwifty <span id="home-hd-author">by Larry Gao</span></h1>
 
@@ -285,6 +285,11 @@ export default {
       clearInterval(this.ticker);
       this.ticker = null;
     }
+
+    if (this._autoSaveInterval) {
+      clearInterval(this._autoSaveInterval);
+      this._autoSaveInterval = null;
+    }
   },
   methods: {
     onBrowserClose(e) {
@@ -544,36 +549,33 @@ export default {
 
       this.$emit("tab-opened", this.tab.tabs);
 
-      this.scheduleAutoReconnectSave();
+      this.startAutoReconnectSaver();
     },
-    scheduleAutoReconnectSave() {
-      let attempts = 0;
-      const trySave = () => {
-        attempts++;
-        const tabs = this.tab.tabs;
-        const allHaveTokens = tabs.length > 0 && tabs.every(
-          (t) => t.control && t.control.reconnectToken,
-        );
-        if (allHaveTokens || attempts >= 10) {
-          this.saveAutoReconnect();
-        } else {
-          setTimeout(trySave, 500);
-        }
-      };
-      setTimeout(trySave, 500);
+    startAutoReconnectSaver() {
+      if (this._autoSaveInterval) return;
+      this._autoSaveInterval = setInterval(() => {
+        this.saveAutoReconnect();
+      }, 2000);
+      // Also save after a short initial delay
+      setTimeout(() => this.saveAutoReconnect(), 1000);
     },
     saveAutoReconnect() {
       try {
         const tabs = this.tab.tabs;
-        if (tabs.length === 0) {
-          // Don't clear sessionStorage during an active reconnect attempt
-          if (!this.reconnecting) {
-            sessionStorage.removeItem("sshwifty_auto_reconnect_tabs");
-          }
+
+        // During active reconnect, never overwrite saved data — it's the
+        // source-of-truth for the tabs we're still restoring
+        if (this.reconnecting) {
           return;
         }
 
-        // Load existing saved tabs to preserve data across rapid refreshes
+        if (tabs.length === 0) {
+          sessionStorage.removeItem("sshwifty_auto_reconnect_tabs");
+          sessionStorage.removeItem("sshwifty_auto_reconnect");
+          return;
+        }
+
+        // Load existing saved tabs to preserve data for tabs without tokens yet
         let existingEntries = [];
         try {
           const raw = sessionStorage.getItem("sshwifty_auto_reconnect_tabs");
@@ -594,7 +596,6 @@ export default {
           if (token) {
             let userData = null;
 
-            // Parse user@host from tab name for precise matching
             const tabName = tabs[i].name || "";
             const atIdx = tabName.indexOf("@");
             let tabUser = "";
@@ -604,7 +605,6 @@ export default {
               tabHost = tabName.slice(atIdx + 1);
             }
 
-            // Try to find matching known entry for auth/charset info
             for (let k = knowns.length - 1; k >= 0; k--) {
               const kn = knowns[k];
               if (!kn.data || !kn.data.user) continue;
@@ -622,7 +622,6 @@ export default {
               }
             }
 
-            // Fallback: construct userData from tab name
             if (!userData && tabUser && tabHost) {
               userData = {
                 host: tabHost,
@@ -634,7 +633,6 @@ export default {
               };
             }
 
-            // Fall back to existing saved data by token
             if (!userData) {
               const existing = existingEntries.find((e) => e.token === token);
               if (existing) userData = existing.data;
@@ -650,7 +648,6 @@ export default {
               });
             }
           } else if (i < existingEntries.length && existingEntries[i].token) {
-            // Tab hasn't received its token yet — keep the previous entry
             entries.push(existingEntries[i]);
           }
         }
@@ -660,10 +657,7 @@ export default {
             "sshwifty_auto_reconnect_tabs",
             JSON.stringify(entries),
           );
-        }
 
-        // Also save legacy format for single-tab backward compat
-        if (entries.length > 0) {
           const first = entries[0];
           sessionStorage.setItem(
             "sshwifty_auto_reconnect",
@@ -718,19 +712,12 @@ export default {
         this.connection.get(this.socket).catch(() => {});
 
         let anySuccess = false;
-        for (const saved of validEntries) {
-          const ok = await this.tryReattachOrReconnect(saved);
+        for (let si = 0; si < validEntries.length; si++) {
+          const ok = await this.tryReattachOrReconnect(validEntries[si]);
           if (ok) anySuccess = true;
         }
 
-        if (!anySuccess) {
-          this.reconnecting = false;
-        } else {
-          // Safety fallback: hide overlay after 5s if tab hasn't appeared
-          setTimeout(() => {
-            this.reconnecting = false;
-          }, 5000);
-        }
+        this.reconnecting = false;
       } catch (_e) {
         this.reconnecting = false;
         sessionStorage.removeItem("sshwifty_auto_reconnect");
@@ -749,9 +736,53 @@ export default {
         check();
       });
     },
-    async tryReattachOrReconnect(saved) {
-      await this.waitForConnectorFree();
+    connectIndependent(known) {
+      const self = this;
+      return new Promise((resolve) => {
+        (async () => {
+          try {
+            const conn = await self.connection.get(self.socket);
+            const connector = self.getConnectorByType(known.type);
+            if (!connector) {
+              resolve(false);
+              return;
+            }
 
+            const wizard = connector.execute(
+              conn,
+              self.controls,
+              self.connector.historyRec,
+              known.data,
+              known.session,
+              known.keptSessions,
+              () => {
+                self.connector.knowns = self.connector.historyRec.all();
+              },
+            );
+
+            // Drive the wizard to completion without connector.vue
+            // NEXT_PROMPT=1, NEXT_WAIT=2, NEXT_DONE=3
+            while (true) {
+              const next = await wizard.next();
+              const type = next.type();
+              if (type === 3) {
+                const data = next.data();
+                if (data.success()) {
+                  self.addToTab(data.data());
+                  self.$emit("tab-opened", self.tab.tabs);
+                  self.startAutoReconnectSaver();
+                }
+                resolve(data.success());
+                return;
+              }
+            }
+          } catch (_e) {
+            resolve(false);
+          }
+        })();
+      });
+    },
+    async tryReattachOrReconnect(saved) {
       // Try reattach first (preserves SSH session + terminal history)
       try {
         const reattachResp = await fetch(
@@ -760,7 +791,7 @@ export default {
         );
         if (reattachResp.ok) {
           await reattachResp.json();
-          this.connectKnown({
+          const ok = await this.connectIndependent({
             uid: saved.uid || "",
             title: saved.title,
             type: saved.type,
@@ -776,8 +807,7 @@ export default {
             session: { credential: "" },
             keptSessions: [],
           });
-          await this.waitForConnectorFree();
-          return true;
+          if (ok) return true;
         }
       } catch (_reattachErr) {
         void _reattachErr;
@@ -791,7 +821,7 @@ export default {
         if (!resp.ok) return false;
         await resp.json();
 
-        this.connectKnown({
+        const ok = await this.connectIndependent({
           uid: saved.uid || "",
           title: saved.title,
           type: saved.type,
@@ -799,8 +829,7 @@ export default {
           session: { credential: "_reconnect:" + saved.token },
           keptSessions: ["credential"],
         });
-        await this.waitForConnectorFree();
-        return true;
+        return ok;
       } catch (_reconnectErr) {
         void _reconnectErr;
         return false;
@@ -826,9 +855,6 @@ export default {
         }) - 1,
       );
 
-      if (this.reconnecting) {
-        this.reconnecting = false;
-      }
     },
     removeFromTab(index) {
       let isLast = index === this.tab.tabs.length - 1;
