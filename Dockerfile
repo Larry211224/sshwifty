@@ -25,9 +25,11 @@ RUN set -ex && \
     go version && \
     npm version
 
-# Build the base environment for application libraries
-FROM base AS libbase
-COPY . /tmp/.build/sshwifty
+# Install dependencies (cached unless package.json/go.mod change)
+FROM base AS deps
+RUN mkdir -p /tmp/.build/sshwifty
+COPY package.json package-lock.json /tmp/.build/sshwifty/
+COPY go.mod go.sum /tmp/.build/sshwifty/
 RUN set -ex && \
     cd / && \
     export PATH=$PATH:/ && \
@@ -35,13 +37,13 @@ RUN set -ex && \
     export CPPFLAGS='-DPNG_ARM_NEON_OPT=0' && \
     export GOPROXY=https://goproxy.cn,direct && \
     /try.sh apt-get install libpng-dev -y && \
-    ls -l /tmp/.build/sshwifty && \
     /child.sh \
         "cd /tmp/.build/sshwifty && echo '#!/bin/sh' > /npm_install.sh && echo \"npm install || (npm cache clean -f && rm ~/.npm/_* -rf && false)\" >> /npm_install.sh && chmod +x /npm_install.sh && /try.sh /npm_install.sh && rm /npm_install.sh" \
         'cd /tmp/.build/sshwifty && export GOPROXY=https://goproxy.cn,direct && /try.sh go mod download'
 
-# Main building environment
-FROM libbase AS builder
+# Copy source and build (only re-runs when source files change)
+FROM deps AS builder
+COPY . /tmp/.build/sshwifty
 RUN set -ex && \
     cd / && \
     export PATH=$PATH:/ && \
