@@ -233,6 +233,40 @@ func (s socket) Get(
 	defer c.Close()
 	defer w.disable()
 
+	// Keepalive: reset read deadline on Pong; ping every 30s to prevent
+	// NAT/proxy idle timeouts from killing the WebSocket.
+	pingInterval := s.serverCfg.HeartbeatTimeout
+	if pingInterval <= 0 || pingInterval > 60*time.Second {
+		pingInterval = 30 * time.Second
+	}
+	pongWait := pingInterval + 10*time.Second
+
+	c.SetReadDeadline(time.Now().Add(pongWait))
+	c.SetPongHandler(func(string) error {
+		c.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
+	pingDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(pingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if wErr := c.WriteControl(
+					websocket.PingMessage, nil,
+					time.Now().Add(10*time.Second),
+				); wErr != nil {
+					return
+				}
+			case <-pingDone:
+				return
+			}
+		}
+	}()
+	defer close(pingDone)
+
 	wsReader := rw.NewFetchReader(s.buildWSFetcher(c))
 	wsWriter := websocketWriter{Conn: c}
 
