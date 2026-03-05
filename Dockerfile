@@ -36,10 +36,7 @@ RUN mkdir -p /tmp/.build/sshwifty
 COPY package.json package-lock.json /tmp/.build/sshwifty/
 COPY _packages/ /tmp/.build/sshwifty/_packages/
 COPY go.mod go.sum /tmp/.build/sshwifty/
-RUN --mount=type=cache,target=/root/.npm \
-    --mount=type=cache,target=/root/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    set -ex && \
+RUN set -ex && \
     cd / && \
     export PATH=$PATH:/ && \
     export DEBIAN_FRONTEND=noninteractive && \
@@ -52,12 +49,11 @@ RUN --mount=type=cache,target=/root/.npm \
 # Copy source and build (only re-runs when source files change)
 FROM deps AS builder
 COPY . /tmp/.build/sshwifty
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/root/.npm \
-    --mount=type=cache,target=/root/go/pkg/mod \
+RUN --mount=type=cache,target=/root/.cache/go-build,id=sshwifty-gobuild \
     set -ex && \
     cd / && \
     export PATH=$PATH:/ && \
+    export GOPROXY=https://goproxy.cn,direct && \
     ([ -z "$HTTP_PROXY" ] || (git config --global http.proxy "$HTTP_PROXY" && npm config set proxy "$HTTP_PROXY")) && \
     ([ -z "$HTTPS_PROXY" ] || (git config --global https.proxy "$HTTPS_PROXY" && npm config set https-proxy "$HTTPS_PROXY")) && \
     (cd /tmp/.build/sshwifty && /try.sh npm run build && mv ./sshwifty /)
