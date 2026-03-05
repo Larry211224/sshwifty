@@ -13,7 +13,7 @@ RUN set -ex && \
     ([ -z "$HTTP_PROXY" ] || (echo "Acquire::http::Proxy \"$HTTP_PROXY\";" >> /etc/apt/apt.conf)) && \
     ([ -z "$HTTPS_PROXY" ] || (echo "Acquire::https::Proxy \"$HTTPS_PROXY\";" >> /etc/apt/apt.conf)) && \
     (echo "Acquire::Retries \"8\";" >> /etc/apt/apt.conf) && \
-    echo '#!/bin/sh' > /install.sh && echo 'apt-get -y update && apt-get -y --fix-broken install autoconf automake libtool build-essential ca-certificates curl git nodejs npm libvips libvips-dev' >> /install.sh && chmod +x /install.sh && \
+    echo '#!/bin/sh' > /install.sh && echo 'apt-get -y update && apt-get -y --fix-broken install autoconf automake libtool build-essential ca-certificates curl git nodejs npm libvips libvips-dev libpng-dev' >> /install.sh && chmod +x /install.sh && \
     /try.sh /install.sh && rm /install.sh && \
     /try.sh update-ca-certificates -f && c_rehash && \
     curl -fsSL https://golang.google.cn/dl/go1.24.3.linux-$(dpkg --print-architecture).tar.gz | tar -C /usr/local -xz && \
@@ -36,13 +36,15 @@ RUN mkdir -p /tmp/.build/sshwifty
 COPY package.json package-lock.json /tmp/.build/sshwifty/
 COPY _packages/ /tmp/.build/sshwifty/_packages/
 COPY go.mod go.sum /tmp/.build/sshwifty/
-RUN set -ex && \
+RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=cache,target=/root/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    set -ex && \
     cd / && \
     export PATH=$PATH:/ && \
     export DEBIAN_FRONTEND=noninteractive && \
     export CPPFLAGS='-DPNG_ARM_NEON_OPT=0' && \
     export GOPROXY=https://goproxy.cn,direct && \
-    /try.sh apt-get install libpng-dev -y && \
     /child.sh \
         "cd /tmp/.build/sshwifty && echo '#!/bin/sh' > /npm_install.sh && echo \"npm install || (npm cache clean -f && rm ~/.npm/_* -rf && false)\" >> /npm_install.sh && chmod +x /npm_install.sh && /try.sh /npm_install.sh && rm /npm_install.sh" \
         'cd /tmp/.build/sshwifty && export GOPROXY=https://goproxy.cn,direct && /try.sh go mod download'
@@ -50,7 +52,9 @@ RUN set -ex && \
 # Copy source and build (only re-runs when source files change)
 FROM deps AS builder
 COPY . /tmp/.build/sshwifty
-RUN set -ex && \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/root/.npm \
+    set -ex && \
     cd / && \
     export PATH=$PATH:/ && \
     ([ -z "$HTTP_PROXY" ] || (git config --global http.proxy "$HTTP_PROXY" && npm config set proxy "$HTTP_PROXY")) && \
