@@ -42,6 +42,12 @@ typings/
 application/controller/static_pages/
 application/controller/static_pages.go
 sshwifty
+sshwifty-linux-*
+*.conf.json
+.DS_Store
 
 # Development artifacts
 _dev_notes/
+
+# Cursor rules (symlinks to shared Cursor-Rules repo)
+.cursor/rules/

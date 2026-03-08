@@ -2,7 +2,9 @@ services:
   sshwifty:
     image: sshwifty:dev
     container_name: sshwifty
-    build: ./
+    build:
+      context: ./
+      dockerfile: Dockerfile.deploy
     restart: unless-stopped
     environment:
       - SSHWIFTY_SHAREDKEY=211224
