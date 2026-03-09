@@ -235,9 +235,19 @@ SSH 会话在浏览器断开后仍保持活跃（最长 12 小时），实现刷
   控制粒度: 50ms tick, 每 tick 发送 rate/20 字节
 ```
 
-### 4. WebSocket 保活
+### 4. 连接保活（多层机制）
 
-所有 WebSocket 连接均实现 Ping/Pong 保活，防止 NAT/代理空闲超时断开：
+为防止连接意外断开，实现了从 OS 层到应用层的多级保活：
+
+| 层级 | 机制 | 间隔 | 代码位置 |
+|------|------|------|----------|
+| OS/TCP | TCP KeepAlive | 30s | `server/conn.go` Accept() |
+| WebSocket | Ping/Pong | HeartbeatTimeout | `controller/socket.go` |
+| WebSocket | ReadDeadline 数据刷新 | 每次收到数据 | `controller/socket.go` buildWSFetcher() |
+| SSH | SFTP SSH KeepAlive | 30s | `controller/socket_sftp.go` |
+| SSH | 持久化会话 KeepAlive | 30s | `command/persistent_session.go` |
+
+HTTP Server 的 `ReadTimeout`/`WriteTimeout` 设为 0（禁用），避免在 WebSocket 升级后仍持有底层连接的绝对 deadline。`ReadHeaderTimeout` 保留用于防御 slowloris 攻击。
 
 - SSH WebSocket：服务端每 `HeartbeatTimeout` 秒发送 Ping，Pong 超时 = Ping 间隔 + 10s
 - SFTP WebSocket：双向保活，服务端 Ping (30s) + 客户端 Worker JSON ping (30s)

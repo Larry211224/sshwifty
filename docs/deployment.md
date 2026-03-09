@@ -97,7 +97,24 @@ docker run -d \
 
 ### 方式一：反向代理（推荐）
 
-使用 Nginx / Caddy 等反向代理提供 TLS，Sshwifty 本身跑 HTTP：
+使用 Nginx / Caddy 等反向代理提供 TLS，Sshwifty 本身跑 HTTP。
+
+#### Caddy（推荐）
+
+```caddy
+ssh.example.com {
+    reverse_proxy localhost:8182 {
+        transport http {
+            read_timeout 0
+            write_timeout 0
+        }
+    }
+}
+```
+
+Caddy 自动处理 WebSocket 升级和 TLS 证书（Let's Encrypt），无需额外配置。`read_timeout 0` / `write_timeout 0` 禁用反向代理超时，让 WebSocket 长连接由 Sshwifty 自身管理。
+
+#### Nginx
 
 ```nginx
 server {
@@ -139,6 +156,23 @@ docker run -d \
 # 修改 docker-compose.yml 中的 dockerfile 为 Dockerfile
 docker compose up -d --build
 ```
+
+## 连接稳定性
+
+Sshwifty 内置多层保活机制防止连接意外断开：
+
+| 层级 | 机制 | 间隔 | 作用 |
+|------|------|------|------|
+| OS 层 | TCP KeepAlive | 30s | 防止 NAT/防火墙/负载均衡器静默断连 |
+| 应用层 | WebSocket Ping/Pong | HeartbeatTimeout | 检测 WebSocket 连接存活 |
+| 应用层 | WS ReadDeadline 刷新 | 每次收到数据 | 有数据时自动延长超时 |
+| SSH 层 | SSH KeepAlive（SFTP 通道） | 30s | 防止远程 SSH 服务器关闭空闲 SFTP 连接 |
+
+如果仍遇到断连，按以下顺序排查：
+
+1. **反向代理超时** — 确保 Caddy 设置了 `read_timeout 0` / `write_timeout 0`，或 Nginx 设置了足够大的 `proxy_read_timeout`
+2. **云服务商防火墙** — 部分云服务商（如阿里云安全组）会关闭长时间空闲的 TCP 连接，TCP KeepAlive 可缓解此问题
+3. **HeartbeatTimeout** — 适当缩短 `SSHWIFTY_HEARTBEATTIMEOUT`（如 30）可增加心跳频率
 
 ## 安全建议
 
