@@ -95,10 +95,10 @@ func (s Server) Serve(
 		server: http.Server{
 			Handler:           handlerBuilder(commonCfg, cfg, l),
 			TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
-			ReadTimeout:       cfg.ReadTimeout,
+			ReadTimeout:       0,
 			ReadHeaderTimeout: cfg.InitialTimeout,
-			WriteTimeout:      cfg.WriteTimeout,
-			IdleTimeout:       cfg.ReadTimeout,
+			WriteTimeout:      0,
+			IdleTimeout:       cfg.InitialTimeout,
 			MaxHeaderBytes:    http.DefaultMaxHeaderBytes,
 			ErrorLog:          goLog.New(loggerWriter{l: l}, "", 0),
 		},

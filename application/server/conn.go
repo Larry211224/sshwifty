@@ -38,6 +38,11 @@ func (l listener) Accept() (net.Conn, error) {
 		return nil, accErr
 	}
 
+	if tcpConn, ok := acc.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+	}
+
 	timeoutConn := network.NewTimeoutConn(acc, l.readTimeout, l.writeTimeout)
 
 	return conn{
