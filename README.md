@@ -6,103 +6,93 @@
 
 ![Screenshot](Screenshot.png)
 
-## Features
+## Fork 增强功能
 
-- **SSH Terminal**: Full-featured SSH terminal emulator powered by xterm.js with WebGL rendering, unlimited scrollback buffer
-- **SFTP File Manager**: Built-in file browser with drag-and-drop upload, download, directory creation, and file/folder deletion
-- **Adaptive Rate Limiting**: Dynamic SFTP upload speed adjustment based on network latency (AIMD algorithm), ensuring terminal responsiveness during file transfers
-- **Web Worker Architecture**: SFTP operations run in a dedicated Web Worker thread, preventing UI freezes during large file transfers
-- **Persistent SSH Sessions**: SSH sessions survive browser refresh — terminal output is preserved via server-side ring buffer and automatically reattached (12-hour TTL)
-- **Password Saving**: Save SSH passwords in browser localStorage (XOR obfuscated) for auto-login on reconnection — no password prompt needed
-- **Seamless Refresh**: Browser refresh restores all SSH tabs instantly with full terminal history, no visible loading flicker
-- **SharedKey Persistence**: Web authentication passphrase is remembered for 12 hours, surviving page refreshes
-- **Font Size Control**: Adjustable terminal font size with persistent settings
-- **Preset Connections**: Pre-configure SSH connections for quick access
-- **Mobile Responsive**: Optimized layout for phone and tablet screens with touch-friendly controls
-- **Secure**: SharedKey authentication for web interface access, strict WebSocket origin validation
+基于上游 [nirui/sshwifty](https://github.com/nirui/sshwifty) 新增的全部功能：
 
-## Install
+### SSH 终端体验
 
-### Docker Image (recommended)
+- **持久化会话** — SSH 会话在服务端保持存活（12 小时 TTL），浏览器刷新后自动恢复终端历史输出（Ring Buffer 机制）
+- **多标签恢复** — 刷新页面时一键恢复所有 SSH 标签页，无闪烁加载过程
+- **密码保存** — SSH 密码存储在浏览器 localStorage（XOR 混淆），重连时自动登录
+- **SharedKey 持久化** — Web 访问密码记忆 12 小时，刷新页面无需重新输入
+- **无限回滚** — 终端滚动缓冲区扩展至 999,999 行
+- **字体调节** — 可调终端字体大小，设置持久化
+
+### SFTP 文件管理
+
+- **文件浏览器** — 树形目录导航，支持文件/文件夹的新建、删除
+- **拖拽上传** — 将文件拖入面板即可上传，大文件分块传输
+- **AIMD 自适应限速** — 基于 SSH keepalive 延迟探测动态调整上传速率（512 KB/s ~ 10 MB/s），大文件传输不阻塞终端
+- **Web Worker 架构** — SFTP 操作在独立 Worker 线程中运行，UI 不卡顿
+- **自动重连** — SFTP 断连后指数退避自动重连
+
+### 连接稳定性
+
+- **TCP KeepAlive** — OS 层 30s 间隔探测，防止 NAT/防火墙/负载均衡器静默断连
+- **WebSocket Ping/Pong** — 应用层心跳保活，可配置间隔
+- **ReadDeadline 数据刷新** — 收到任何客户端数据即延长超时，避免活跃连接被误杀
+- **SFTP SSH KeepAlive** — SFTP 独立 SSH 连接每 30s 发送 keepalive，防止远程服务器关闭空闲会话
+- **http.Server 超时优化** — 禁用 Go HTTP Server 的绝对超时，避免 WebSocket 升级后连接被底层 deadline 切断
+
+### 部署优化
+
+- **轻量 Docker 部署** — 本地交叉编译 + alpine 最小镜像，服务器构建仅需 ~20 秒（对比原始多阶段构建 10-15 分钟）
+- **一键构建脚本** — `build-deploy.sh` 自动检测增量构建，仅在必要时重新编译前端
+
+### UI 与适配
+
+- **自定义配色** — 重新设计的界面色彩方案
+- **移动端适配** — 手机/平板响应式布局，触控友好
+- **移除 Telnet** — 仅保留 SSH 功能，精简界面
+
+## 快速部署
+
+推荐使用"本地交叉编译 + 轻量 Docker"方式，服务器构建约 20 秒。
+
+### 1. 本地编译
 
 ```shell
-$ docker run --detach \
-  --restart unless-stopped \
-  --publish 8182:8182 \
-  --name sshwifty \
-  niruix/sshwifty:latest
+git clone https://github.com/Larry211224/sshwifty.git
+cd sshwifty
+npm install
+./build-deploy.sh            # 默认 linux/amd64
+./build-deploy.sh linux arm64  # ARM 服务器
 ```
 
-This will open port `8182` on the Docker host. To expose locally only:
+### 2. 部署到服务器
 
 ```shell
-$ docker run --detach \
-  --restart unless-stopped \
-  --publish 127.0.0.1:8182:8182 \
-  --name sshwifty \
-  niruix/sshwifty:latest
+scp sshwifty-linux-amd64 Dockerfile.deploy docker-compose.yml user@server:/opt/sshwifty/
+# 服务器上
+cd /opt/sshwifty && docker compose up -d --build
 ```
 
-For TLS support:
+### 3. 访问
+
+浏览器打开 `http://your-server:8182`，输入 SharedKey 密码即可。
+
+> 详细的部署配置、反向代理（Caddy/Nginx）、TLS 设置请参考 [docs/deployment.md](docs/deployment.md)。
+
+### 从源码编译（开发）
+
+环境要求：`git`、`node` (v16+)、`npm`、`go` (v1.24+)
 
 ```shell
-$ openssl req \
-  -newkey rsa:4096 -nodes -keyout domain.key -x509 -days 90 -out domain.crt
-$ docker run --detach \
-  --restart always \
-  --publish 8182:8182 \
-  --env SSHWIFTY_DOCKER_TLSCERT="$(cat domain.crt)" \
-  --env SSHWIFTY_DOCKER_TLSCERTKEY="$(cat domain.key)" \
-  --name sshwifty \
-  niruix/sshwifty:latest
+git clone https://github.com/Larry211224/sshwifty.git
+cd sshwifty
+npm install
+npm run build
 ```
 
-### Compile from source code
-
-Requirements:
-
-- `git` to download the source code
-- `node` (v16+) and `npm` to build the front-end
-- `go` (v1.21+) to build the back-end
-
-Build steps:
+生成 `sshwifty` 可执行文件。运行：
 
 ```shell
-$ git clone https://github.com/Larry211224/sshwifty.git
-$ cd sshwifty
-$ npm install
-$ npm run build
-```
-
-The `sshwifty` binary will be generated in the current directory.
-
-To build manually (step by step):
-
-```shell
-$ npm install
-$ npx webpack --mode production
-$ go generate ./...
-$ go build -o sshwifty .
-```
-
-### Run
-
-Using environment variables:
-
-```shell
-$ SSHWIFTY_LISTENINTERFACE='0.0.0.0' \
+SSHWIFTY_LISTENINTERFACE='0.0.0.0' \
   SSHWIFTY_LISTENPORT=8182 \
   SSHWIFTY_SHAREDKEY='your-password' \
   ./sshwifty
 ```
-
-Using a configuration file:
-
-```shell
-$ SSHWIFTY_CONFIG=./sshwifty.conf.json ./sshwifty
-```
-
-Then open `http://localhost:8182` in your browser.
 
 ## Configuration
 
@@ -225,23 +215,9 @@ WebCrypt API is required and only available in [Secure Contexts](https://develop
 
 Not officially supported. Sshwifty assets are served under the `/sshwifty` URL prefix, so you could proxy those requests, but this is not recommended.
 
-## Changes from Upstream
-
-This fork adds the following features on top of the original sshwifty:
-
-- Integrated SFTP file manager with drag-and-drop upload and adaptive rate limiting
-- Server-side persistent SSH sessions (survive browser refresh, 12-hour TTL)
-- Multi-tab session recovery with seamless refresh UX
-- SSH password saving and auto-login
-- SharedKey passphrase persistence (12 hours)
-- Unlimited terminal scrollback buffer
-- Mobile responsive layout
-- Removed Telnet support (SSH-only)
-- Custom UI color scheme
-
 ## Credits
 
-Based on the original [Sshwifty](https://github.com/nirui/sshwifty) by [Ni Rui](https://github.com/nirui).
+Based on the original [Sshwifty](https://github.com/nirui/sshwifty) by [Ni Rui](https://github.com/nirui). See [Fork 增强功能](#fork-增强功能) for all changes from upstream.
 
 ## License
 
